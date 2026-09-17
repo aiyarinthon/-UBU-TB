@@ -878,7 +878,7 @@ export const ContactsView: React.FC<Props> = ({
         onClose={() => setEmailModalContact(null)}
         contact={emailModalContact}
         followUps={followUps}
-        currentUserName={currentUserProfile?.name || 'เจ้าหน้าที่เวชกรรมสังคม'}
+        currentUserName={currentUserProfile?.displayName || currentUserProfile?.name || 'เจ้าหน้าที่ควบคุมโรค'}
       />
 
       {/* PDF Export Modal */}

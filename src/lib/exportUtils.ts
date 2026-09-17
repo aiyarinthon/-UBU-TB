@@ -52,12 +52,11 @@ export function exportPatientsToExcel(patients: Patient[]) {
                      p.status === 'completed' ? 'รักษาครบกำหนด/หาย' :
                      p.status === 'transferred' ? 'ส่งต่อ' :
                      p.status === 'defaulted' ? 'ขาดการรักษา' : p.status,
-    'ประเภทผู้ป่วย': p.patientType || '-',
-    'การวินิจฉัย/ประเภทวัณโรค': p.tbType || '-',
-    'ผลตรวจเสมหะ': p.sputumResult || '-',
-    'ผลตรวจ GeneXpert': p.geneXpertResult || '-',
-    'สูตรยารักษา': p.regimen || '-',
-    'วันที่เริ่มยา': formatDate(p.treatmentStartDate),
+    'ประเภทผู้ป่วย': p.treatmentCategory || '-',
+    'การวินิจฉัย/ประเภทวัณโรค': p.tbClassification || '-',
+    'น้ำหนัก (กก.)': p.weightKg || '-',
+    'สูตรยารักษา': p.treatmentRegimen || '-',
+    'วันที่เริ่มวินิจฉัย/รักษา': formatDate(p.diagnosisDate),
     'วันที่ขึ้นทะเบียน NTIP': formatDate(p.ntipRegistrationDate),
     'แพทย์ผู้ดูแล': p.doctorName || '-',
     'โรงพยาบาล': p.hospitalName || 'รพ.มหาวิทยาลัยอุบลราชธานี',
@@ -152,13 +151,13 @@ export function exportAllDataToExcel(
     'HN': p.hn,
     'ชื่อ-สกุล': p.fullName,
     'อายุ': p.age,
-    'เพศ': p.gender,
+    'เพศ': p.gender === 'male' ? 'ชาย' : p.gender === 'female' ? 'หญิง' : 'อื่นๆ',
     'เบอร์โทร': p.phone,
     'สถานะ': p.status,
-    'การวินิจฉัย': p.tbType,
-    'ผลเสมหะ': p.sputumResult,
-    'สูตรยา': p.regimen,
-    'วันที่เริ่มยา': p.treatmentStartDate,
+    'ประเภทผู้ป่วย': p.treatmentCategory,
+    'การวินิจฉัย': p.tbClassification,
+    'สูตรยา': p.treatmentRegimen,
+    'วันที่เริ่มรักษา': p.diagnosisDate,
     'รหัส n-tip': p.ntipRegistrationDate,
     'แก้ไขโดย': p.lastUpdatedBy,
   }));
@@ -214,14 +213,15 @@ export function exportAllDataToExcel(
   // 4. Daily Logs Sheet
   const logsData = logs.map((l, idx) => ({
     'ลำดับ': idx + 1,
-    'HN ผู้ป่วย': l.patientHN,
+    'รหัสผู้ป่วย': l.patientId,
     'วันที่': l.date,
     'ทานยา': l.takenMedication ? 'ทานครบ' : 'ไม่ทาน/ลืม',
-    'ตรงเวลา': l.takenOnTime ? 'ตรงเวลา' : 'ไม่ตรงเวลา',
-    'ระดับอาการ': l.severityLevel,
-    'อาการข้างเคียง': (l.sideEffects || []).join(', '),
+    'เวลาทาน': l.medicationTime || '-',
+    'ผู้กำกับการทาน (DOTS)': l.supervisorType,
+    'ชื่อผู้กำกับ': l.supervisorName || '-',
+    'ระดับอาการข้างเคียง': l.severityLevel,
+    'อาการข้างเคียงที่พบ': l.sideEffectsNotes || '-',
     'บันทึกโดย': l.recordedBy,
-    'หมายเหตุ': l.notes,
   }));
   const wsLogs = XLSX.utils.json_to_sheet(logsData);
   XLSX.utils.book_append_sheet(workbook, wsLogs, '4. บันทึกการทานยา (DOTS)');

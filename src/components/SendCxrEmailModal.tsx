@@ -30,7 +30,7 @@ export const SendCxrEmailModal: React.FC<Props> = ({
   onClose,
   contact,
   followUps = [],
-  currentUserName = 'เจ้าหน้าที่เวชกรรมสังคม',
+  currentUserName = 'เจ้าหน้าที่ควบคุมโรค',
 }) => {
   if (!isOpen || !contact) return null;
 
@@ -56,13 +56,13 @@ export const SendCxrEmailModal: React.FC<Props> = ({
     contact.cxrResult || 'normal'
   );
   const [cxrFindings, setCxrFindings] = useState(
-    latestCompletedCxr?.resultDetail || contact.cxrResultDetail || 'ผลภาพถ่ายรังสีทรวงอกปกติ ไม่พบรอยโรควัณโรค (CXR Normal, No active pulmonary infiltration)'
+    latestCompletedCxr?.resultDetail || contact.cxrResultDetail || 'ผลภาพถ่ายรังสีทรวงอกปกติ ไม่พบรอยโรควัณโรค (CXR Normal, No active lesion)'
   );
   const [nextAppointment, setNextAppointment] = useState(
     latestCompletedCxr?.nextAppointmentDate || contact.nextCxrDate || ''
   );
   const [hospitalName, setHospitalName] = useState(
-    latestCompletedCxr?.hospitalOrFacility || contact.cxrHospital || 'โรงพยาบาลมหาวิทยาลัยอุบลราชธานี'
+    latestCompletedCxr?.hospitalOrFacility || contact.cxrHospital || 'รพ.มหาวิทยาลัยอุบลราชธานี'
   );
   const [customNote, setCustomNote] = useState('');
   const [copied, setCopied] = useState(false);
@@ -74,9 +74,9 @@ export const SendCxrEmailModal: React.FC<Props> = ({
       setRecipientName(contact.fullName);
       setCxrResult(contact.cxrResult || 'normal');
       setCxrDate(contact.cxrDate || new Date().toISOString().split('T')[0]);
-      setCxrFindings(contact.cxrResultDetail || 'ผลภาพถ่ายรังสีทรวงอกปกติ ไม่พบรอยโรควัณโรค (CXR Normal)');
+      setCxrFindings(contact.cxrResultDetail || 'ผลภาพถ่ายรังสีทรวงอกปกติ ไม่พบรอยโรควัณโรค (CXR Normal, No active lesion)');
       setNextAppointment(contact.nextCxrDate || '');
-      setHospitalName(contact.cxrHospital || 'โรงพยาบาลมหาวิทยาลัยอุบลราชธานี');
+      setHospitalName(contact.cxrHospital || 'รพ.มหาวิทยาลัยอุบลราชธานี');
     }
   }, [contact]);
 
@@ -99,30 +99,44 @@ export const SendCxrEmailModal: React.FC<Props> = ({
     }
   };
 
+  // Helper to format date in Thai
+  const formatThaiDate = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
   // Generate Formal Thai Email Body
-  const emailSubject = `[แจ้งผลตรวจเอกซเรย์ปอด CXR] ${hospitalName} - คุณ${recipientName} (HN: ${contact.hn})`;
+  const emailSubject = `[แจ้งผลตรวจเอกซเรย์ปอด CXR] รพ.มหาวิทยาลัยอุบลราชธานี - คุณ${recipientName}`;
 
-  const emailBody = `เรียน คุณ${recipientName} (HN: ${contact.hn})
+  const formattedCxrDate = formatThaiDate(cxrDate);
+  const formattedNextAppointment = formatThaiDate(nextAppointment);
 
-กลุ่มงานเวชกรรมสังคม ${hospitalName} ขอแจ้งผลการตรวจเอกซเรย์ทรวงอก (Chest X-Ray) และคำแนะนำในการดูแลสุขภาพ ดังนี้:
+  const emailBody = `เรียน คุณ${recipientName}
+
+งานควบคุมโรค รพ.มหาวิทยาลัยอุบลราชธานี ขอแจ้งผลการตรวจเอกซเรย์ทรวงอก (Chest X-Ray) และคำแนะนำในการดูแลสุขภาพ ดังนี้:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋 ข้อมูลการตรวจคัดกรองผู้สัมผัสโรค
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • ชื่อ-สกุล ผู้รับการตรวจ: คุณ${recipientName}
-• เลขประจำตัวผู้ป่วย (HN): ${contact.hn}
 • รอบการตรวจ: ${getRoundLabel(cxrRound)}
-• วันที่เข้ารับการตรวจ: ${cxrDate ? new Date(cxrDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}
-• สถานพยาบาลที่ตรวจ: ${hospitalName}
+• วันที่เข้ารับการตรวจ: ${formattedCxrDate}
+• สถานพยาบาลที่ตรวจ: ${hospitalName || 'รพ.มหาวิทยาลัยอุบลราชธานี'}
 
 📊 ผลการตรวจเอกซเรย์ปอด (CXR Result):
 ➡️ ${getResultBadgeText()}
-${cxrFindings ? `• รายละเอียดผลตรวจ: ${cxrFindings}` : ''}
+• รายละเอียดผลตรวจ: ${cxrFindings || 'ผลภาพถ่ายรังสีทรวงอกปกติ ไม่พบรอยโรควัณโรค (CXR Normal, No active lesion)'}
 
-${nextAppointment ? `📅 กำหนดนัดตรวจติดตามครั้งถัดไป:
-➡️ วันที่ ${new Date(nextAppointment).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })} ณ ${hospitalName}` : ''}
+📅 กำหนดนัดตรวจติดตามครั้งถัดไป:
+➡️ วันที่ ${formattedNextAppointment} ณ ${hospitalName || 'รพ.มหาวิทยาลัยอุบลราชธานี'}
+${customNote ? `\n💬 บันทึกเพิ่มเติมจากเจ้าหน้าที่:\n${customNote}\n` : ''}
 
-${customNote ? `💬 บันทึกเพิ่มเติมจากเจ้าหน้าที่:\n${customNote}\n` : ''}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🩺 คำแนะนำและข้อควรปฏิบัติสำหรับกลุ่มสัมผัส
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -137,11 +151,10 @@ ${customNote ? `💬 บันทึกเพิ่มเติมจากเ�
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📞 ข้อมูลการติดต่อ
-กลุ่มงานเวชกรรมสังคม / คลินิกวัณโรค ${hospitalName}
-โทรศัพท์: 045-353-900 ต่อ กลุ่มงานเวชกรรมสังคม
-วัน-เวลาทำการ: จันทร์ - ศุกร์ (08.30 - 16.30 น.)
-ผู้บันทึกและส่งข้อมูล: ${currentUserName}
-วันที่ส่งแจ้งเตือน: ${new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.`;
+งานควบคุมโรค รพ.มหาวิทยาลัยอุบลราชธานี
+โทรศัพท์: 045-353-909 ต่อ 5923 งานควบคุมโรค
+วัน-เวลาทำการ: จันทร์ - ศุกร์ (08.00 - 16.00 น.)
+ผู้บันทึกและส่งข้อมูล: ${currentUserName || 'เจ้าหน้าที่ควบคุมโรค'}`;
 
   // Actions
   const handleCopyText = async () => {

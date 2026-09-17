@@ -175,6 +175,8 @@ export const BackendAdminModal: React.FC<Props> = ({
 
     const newStaff: StaffAccount = {
       id: `STAFF-${String(staffList.length + 1).padStart(3, '0')}`,
+      username: newStaffEmail.split('@')[0] || `staff${staffList.length + 1}`,
+      password: '15078',
       name: newStaffName.trim(),
       email: newStaffEmail.trim(),
       position: newStaffPosition.trim(),

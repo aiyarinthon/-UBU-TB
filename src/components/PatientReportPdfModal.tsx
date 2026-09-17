@@ -361,12 +361,6 @@ export const PatientReportPdfModal: React.FC<Props> = ({
                 <div><strong>ผลตรวจภาพรังสีทรวงอก (CXR แรกรับ):</strong> {investigation?.initialCxrResult || 'Infiltration / Cavitary lesion'}</div>
                 <div><strong>วันที่ตรวจ CXR:</strong> {investigation?.initialCxrDate ? new Date(investigation.initialCxrDate).toLocaleDateString('th-TH') : '-'}</div>
                 <div>
-                  <strong>ผลการตรวจเลือดหาการติดเชื้อ HIV:</strong>{' '}
-                  <span className="font-bold">
-                    {investigation?.comorbidities?.hiv === 'negative' ? 'Negative (ผลลบ)' : investigation?.comorbidities?.hiv === 'positive' ? 'Positive (ผลบวก)' : 'ไม่ทราบผล / ไม่ได้ตรวจ'}
-                  </span>
-                </div>
-                <div>
                   <strong>โรคร่วม / ปัจจัยเสี่ยง:</strong>{' '}
                   {[
                     investigation?.comorbidities?.diabetes && 'เบาหวาน (DM)',

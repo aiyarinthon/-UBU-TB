@@ -268,12 +268,6 @@ export const InvestigationPrintModal: React.FC<Props> = ({
               <div className="space-y-1">
                 <div><strong>ผลตรวจภาพรังสีทรวงอก (CXR แรกรับ):</strong> {investigation.initialCxrResult || 'Infiltration / Cavitary lesion'}</div>
                 <div><strong>วันที่ตรวจ CXR:</strong> {investigation.initialCxrDate ? new Date(investigation.initialCxrDate).toLocaleDateString('th-TH') : '-'}</div>
-                <div>
-                  <strong>ผลการตรวจเลือดหาการติดเชื้อ HIV:</strong>{' '}
-                  <span className="font-bold">
-                    {investigation.comorbidities.hiv === 'negative' ? 'Negative (ผลลบ)' : investigation.comorbidities.hiv === 'positive' ? 'Positive (ผลบวก)' : 'ไม่ทราบผล / ไม่ได้ตรวจ'}
-                  </span>
-                </div>
               </div>
             </div>
           </div>

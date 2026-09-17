@@ -209,6 +209,8 @@ export interface UserProfile {
 
 export interface StaffAccount {
   id: string;
+  username: string; // เช่น 'aiyarinthon', 'chudapa'
+  password?: string; // รหัสผ่าน เช่น '15078'
   name: string;
   email: string;
   position: string;

@@ -710,25 +710,7 @@ export const InvestigationModal: React.FC<Props> = ({
                 5. ปัจจัยเสี่ยง ประวัติเดิม สภาพแวดล้อม และการระบายอากาศ
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    ผลการตรวจเลือด HIV
-                  </label>
-                  <select
-                    value={formData.comorbidities?.hiv}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      comorbidities: { ...formData.comorbidities!, hiv: e.target.value as any }
-                    })}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-bold"
-                  >
-                    <option value="negative">Negative (ผลลบ)</option>
-                    <option value="positive">Positive (ผลบวก)</option>
-                    <option value="unknown">ไม่ทราบผล / ปฏิเสธการตรวจ</option>
-                  </select>
-                </div>
-
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                     ประวัติเคยป่วยเป็นวัณโรค
