@@ -162,7 +162,7 @@ export const LoginModal: React.FC<Props> = ({
               className="w-full py-3 mt-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 active:scale-[0.99] text-white rounded-xl font-bold text-xs shadow-md shadow-teal-700/20 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <LogIn className="w-4 h-4" />
-              <span>{isSubmitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ (Sign In)'}</span>
+              <span>{isSubmitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}</span>
             </button>
           </form>
         </div>

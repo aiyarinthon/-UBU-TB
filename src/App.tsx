@@ -78,27 +78,9 @@ import {
 const STORAGE_SHEET_KEY = 'tb_care_spreadsheet_config';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | any>(() => {
-    const saved = localStorage.getItem('tb_care_active_user');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    // Default active staff: นางสาวไอญารินธร อุ้มบุญ (aiyarinthon)
-    return {
-      uid: 'STAFF-001',
-      email: 'aiyarinthon.a@ubu.ac.th',
-      displayName: 'นางสาวไอญารินธร  อุ้มบุญ',
-      photoURL: ''
-    };
-  });
-
-  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(() => {
-    return resolveUserProfile({
-      uid: 'STAFF-001',
-      email: 'aiyarinthon.a@ubu.ac.th',
-      displayName: 'นางสาวไอญารินธร  อุ้มบุญ'
-    });
-  });
+  // Start with no active session on initial load so user must log in every time
+  const [currentUser, setCurrentUser] = useState<User | any>(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
 
   const [token, setToken] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -536,13 +518,14 @@ export default function App() {
           <div>
             {/* Google Sheets Connection Banner */}
             <SheetConfigBanner
-              accessToken={token!}
+              accessToken={token}
               spreadsheetId={spreadsheetId}
               spreadsheetUrl={spreadsheetUrl}
               spreadsheetName={spreadsheetName}
               onConfigChange={handleConfigChange}
               onRefreshData={loadSheetData}
               isLoading={isDataLoading}
+              onTokenUpdate={(newToken) => setToken(newToken)}
             />
 
             {/* Primary Navigation Tabs - Always Accessible */}
@@ -865,6 +848,7 @@ export default function App() {
             allInvestigations={investigations}
             allContacts={contacts}
             allFollowUps={followUps}
+            onTokenUpdate={(newToken) => setToken(newToken)}
           />
         )}
         {/* Modal: Login / Switch User */}

@@ -30,6 +30,7 @@ import {
   Permissions 
 } from '../lib/userStore';
 import { verifyAndInitSheets, createTBSheet } from '../lib/sheetsApi';
+import { googleSignIn } from '../lib/auth';
 
 interface Props {
   isOpen: boolean;
@@ -47,6 +48,7 @@ interface Props {
   contacts: ContactPerson[];
   followUps: ContactFollowUp[];
   dailyLogs: DailyLog[];
+  onTokenUpdate?: (token: string) => void;
 }
 
 export const BackendAdminModal: React.FC<Props> = ({
@@ -65,6 +67,7 @@ export const BackendAdminModal: React.FC<Props> = ({
   contacts,
   followUps,
   dailyLogs,
+  onTokenUpdate,
 }) => {
   const [activeTab, setActiveTab] = useState<'sheets' | 'staff' | 'permissions' | 'backup'>('sheets');
   const [staffList, setStaffList] = useState<StaffAccount[]>(() => getStoredStaffList());
@@ -115,11 +118,33 @@ export const BackendAdminModal: React.FC<Props> = ({
   const handleCreateNewSheet = async () => {
     setIsCreating(true);
     try {
-      const res = await createTBSheet(accessToken);
+      let activeToken = accessToken;
+      if (!activeToken) {
+        try {
+          const authRes = await googleSignIn();
+          if (authRes?.accessToken) {
+            activeToken = authRes.accessToken;
+            if (onTokenUpdate) onTokenUpdate(authRes.accessToken);
+          }
+        } catch (authErr: any) {
+          throw new Error('จำเป็นต้องลงชื่อเข้าใช้ Google เพื่อขอสิทธิ์สร้างไฟล์ Google Sheet บน Google Drive');
+        }
+      }
+
+      if (!activeToken) {
+        throw new Error('ไม่พบสิทธิ์การเชื่อมต่อ Google OAuth');
+      }
+
+      const res = await createTBSheet(activeToken);
       onConfigChange(res.spreadsheetId, res.spreadsheetUrl, res.title);
       showToast(true, 'สร้าง Google Sheet ฐานข้อมูลระบบสำเร็จเรียบร้อย พร้อม 5 ตารางหลัก');
     } catch (err: any) {
-      showToast(false, err.message || 'เกิดข้อผิดพลาดในการสร้าง Sheet');
+      const msg = err.message || '';
+      if (msg.includes('invalid authentication credentials') || msg.includes('Expected OAuth 2')) {
+        showToast(false, 'ต้องลงชื่อเข้าใช้ Google Account เพื่อสร้างไฟล์ หรือใช้ "เชื่อมโยง Sheet ที่มีอยู่แล้ว"');
+      } else {
+        showToast(false, msg || 'เกิดข้อผิดพลาดในการสร้าง Sheet');
+      }
     } finally {
       setIsCreating(false);
     }

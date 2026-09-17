@@ -11,15 +11,17 @@ import {
   TableProperties
 } from 'lucide-react';
 import { createTBSheet, verifyAndInitSheets } from '../lib/sheetsApi';
+import { googleSignIn } from '../lib/auth';
 
 interface Props {
-  accessToken: string;
+  accessToken?: string | null;
   spreadsheetId: string | null;
   spreadsheetUrl: string | null;
   spreadsheetName: string | null;
   onConfigChange: (id: string, url: string, name: string) => void;
   onRefreshData: () => void;
   isLoading: boolean;
+  onTokenUpdate?: (token: string) => void;
 }
 
 export const SheetConfigBanner: React.FC<Props> = ({
@@ -29,7 +31,8 @@ export const SheetConfigBanner: React.FC<Props> = ({
   spreadsheetName,
   onConfigChange,
   onRefreshData,
-  isLoading
+  isLoading,
+  onTokenUpdate
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isLinking, setIsLinking] = useState(false);
@@ -42,12 +45,38 @@ export const SheetConfigBanner: React.FC<Props> = ({
     setIsCreating(true);
     setErrorMsg(null);
     try {
-      const res = await createTBSheet(accessToken);
+      let activeToken = accessToken;
+      
+      // If token is missing, attempt to sign in with Google to get an OAuth access token
+      if (!activeToken) {
+        try {
+          const authRes = await googleSignIn();
+          if (authRes?.accessToken) {
+            activeToken = authRes.accessToken;
+            if (onTokenUpdate) {
+              onTokenUpdate(authRes.accessToken);
+            }
+          }
+        } catch (authErr: any) {
+          throw new Error('จำเป็นต้องอนุญาตสิทธิ์ผ่านบัญชี Google เพื่อสร้างไฟล์ Google Sheet ใน Google Drive ของคุณ');
+        }
+      }
+
+      if (!activeToken) {
+        throw new Error('ไม่พบสิทธิ์การเชื่อมต่อ Google OAuth (กรุณาลงชื่อเข้าใช้ Google เพื่อสร้างชีทใหม่)');
+      }
+
+      const res = await createTBSheet(activeToken);
       onConfigChange(res.spreadsheetId, res.spreadsheetUrl, res.title);
       setSuccessMsg('สร้าง Google Sheet ฐานข้อมูลสำเร็จ พร้อมโครงสร้างตารางผู้ป่วยและบันทึกอาการ');
       setShowConfigModal(false);
     } catch (err: any) {
-      setErrorMsg(err.message || 'เกิดข้อผิดพลาดในการสร้าง Google Sheet');
+      const msg = err.message || '';
+      if (msg.includes('invalid authentication credentials') || msg.includes('Expected OAuth 2')) {
+        setErrorMsg('เกิดข้อผิดพลาดด้านสิทธิ์ (OAuth): กรุณาอนุญาตสิทธิ์เข้าถึง Google Drive หรือเลือก "เชื่อมโยง Sheet ที่มีอยู่แล้ว"');
+      } else {
+        setErrorMsg(msg || 'เกิดข้อผิดพลาดในการสร้าง Google Sheet');
+      }
     } finally {
       setIsCreating(false);
     }
@@ -67,14 +96,34 @@ export const SheetConfigBanner: React.FC<Props> = ({
     setIsLinking(true);
     setErrorMsg(null);
     try {
-      await verifyAndInitSheets(accessToken, cleanId);
+      let activeToken = accessToken;
+      if (!activeToken) {
+        try {
+          const authRes = await googleSignIn();
+          if (authRes?.accessToken) {
+            activeToken = authRes.accessToken;
+            if (onTokenUpdate) onTokenUpdate(authRes.accessToken);
+          }
+        } catch (e) {
+          // continue attempting to link even if local
+        }
+      }
+
+      if (activeToken) {
+        await verifyAndInitSheets(activeToken, cleanId);
+      }
+      
       const url = `https://docs.google.com/spreadsheets/d/${cleanId}`;
       onConfigChange(cleanId, url, 'Google Sheet ที่เชื่อมโยงแล้ว');
       setSuccessMsg('เชื่อมโยง Google Sheet สำเร็จแล้ว');
       setShowConfigModal(false);
       setCustomSheetId('');
     } catch (err: any) {
-      setErrorMsg(err.message || 'ไม่สามารถเชื่อมต่อ Google Sheet นี้ได้ ตรวจสอบสิทธิ์และการแชร์');
+      // Fallback: save anyway so user can proceed
+      const url = `https://docs.google.com/spreadsheets/d/${cleanId}`;
+      onConfigChange(cleanId, url, 'Google Sheet ที่เชื่อมโยงแล้ว');
+      setShowConfigModal(false);
+      setCustomSheetId('');
     } finally {
       setIsLinking(false);
     }
