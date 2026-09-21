@@ -11,7 +11,8 @@ import {
   TableProperties,
   KeyRound,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  UploadCloud
 } from 'lucide-react';
 import { createTBSheet, verifyAndInitSheets } from '../lib/sheetsApi';
 import { googleSignIn } from '../lib/auth';
@@ -23,6 +24,7 @@ interface Props {
   spreadsheetName: string | null;
   onConfigChange: (id: string, url: string, name: string) => void;
   onRefreshData: () => void;
+  onPushAllData?: () => void;
   isLoading: boolean;
   onTokenUpdate?: (token: string) => void;
 }
@@ -34,6 +36,7 @@ export const SheetConfigBanner: React.FC<Props> = ({
   spreadsheetName,
   onConfigChange,
   onRefreshData,
+  onPushAllData,
   isLoading,
   onTokenUpdate
 }) => {
@@ -334,11 +337,23 @@ export const SheetConfigBanner: React.FC<Props> = ({
           onClick={onRefreshData}
           disabled={isLoading}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition disabled:opacity-50 cursor-pointer"
-          title="ซิงค์ข้อมูลล่าสุดจาก Google Sheets"
+          title="ดึงข้อมูลล่าสุดจาก Google Sheets เข้าสู่ระบบ"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          <span>ซิงค์ข้อมูล</span>
+          <span>ดึงข้อมูลจาก Sheet</span>
         </button>
+
+        {onPushAllData && (
+          <button
+            onClick={onPushAllData}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition disabled:opacity-50 shadow-2xs cursor-pointer"
+            title="ส่งข้อมูลผู้ป่วย ผู้สัมผัส และบันทึกยาทั้งหมดที่มีในระบบขึ้นไปบันทึกใน Google Sheet ทันที"
+          >
+            <UploadCloud className={`w-3.5 h-3.5 ${isLoading ? 'animate-bounce' : ''}`} />
+            <span>ส่งข้อมูลขึ้น Sheet</span>
+          </button>
+        )}
 
         {spreadsheetUrl && (
           <a

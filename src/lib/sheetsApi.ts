@@ -1086,6 +1086,260 @@ export async function deleteContactFromSheet(accessToken: string, spreadsheetId:
   }
 }
 
+export async function pushAllLocalDataToSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  data: {
+    patients: Patient[];
+    investigations: InvestigationForm[];
+    contacts: ContactPerson[];
+    followUps: ContactFollowUp[];
+    logs: DailyLog[];
+  }
+): Promise<{ success: boolean; count: number }> {
+  await verifyAndInitSheets(accessToken, spreadsheetId);
+
+  const genderMap: Record<string, string> = { male: 'ชาย', female: 'หญิง', other: 'อื่นๆ' };
+  const riskMap: Record<string, string> = { high: 'เสี่ยงสูง', low: 'เสี่ยงต่ำ' };
+  const typeMap: Record<string, string> = {
+    household: 'ผู้สัมผัสร่วมบ้าน (Household)',
+    close: 'ผู้สัมผัสใกล้ชิด (Close Contact)',
+    workplace: 'ที่ทำงาน/สถานศึกษา',
+    other: 'อื่นๆ',
+  };
+  const supervisorMap: Record<string, string> = {
+    self: 'ทานยาด้วยตนเอง',
+    family: 'ญาติ/ครอบครัว',
+    health_worker: 'เจ้าหน้าที่สาธารณสุข',
+    vhv: 'อสม.',
+  };
+
+  const patientRows = data.patients.map(p => [
+    p.id,
+    p.hn,
+    p.fullName,
+    p.phone,
+    p.email || '',
+    p.ntipRegistrationDate || '',
+    p.diagnosisDate || '',
+    p.age || 0,
+    genderMap[p.gender] || p.gender,
+    p.nationalId || '',
+    p.treatmentRights || '',
+    p.address || '',
+    `${p.emergencyContact?.name || ''} - ${p.emergencyContact?.phone || ''}`,
+    p.treatmentCategory || 'Cat 1 (New)',
+    p.tbClassification || 'Pulmonary',
+    p.weightKg || 0,
+    p.treatmentRegimen || '2HRZE/4HR',
+    p.doctorName || '',
+    p.hospitalName || '',
+    p.householdContactsCount || 0,
+    p.nonHouseholdContactsCount || 0,
+    p.investigationStatus || 'pending',
+    p.status || 'active',
+    p.notes || '',
+    p.createdAt || new Date().toISOString(),
+    p.lastUpdatedBy || '',
+    p.updatedAt || new Date().toISOString(),
+  ]);
+
+  const investigationRows = data.investigations.map(inv => {
+    const hivLabel = inv.comorbidities?.hiv === 'positive' ? 'ผลบวก (+)' : inv.comorbidities?.hiv === 'negative' ? 'ผลลบ (-)' : 'ไม่ระบุ/ไม่ได้ตรวจ';
+    const prevTbLabel = inv.comorbidities?.previousTbHistory && inv.comorbidities.previousTbHistory !== 'no' ? 'เคย' : 'ไม่เคย';
+    return [
+      inv.id,
+      inv.patientId,
+      inv.patientHN,
+      inv.patientName,
+      inv.investigationDate,
+      inv.investigatorName,
+      inv.investigatorPosition || '',
+      inv.occupation || '',
+      inv.symptomOnsetDate || '',
+      inv.infectiousPeriodStart || '',
+      inv.infectiousPeriodEnd || '',
+      inv.tbClassification || '',
+      inv.afbSmearResult || '',
+      inv.afbSmearDate || '',
+      inv.geneXpertResult || '',
+      inv.geneXpertDate || '',
+      inv.cultureResult || '',
+      inv.initialCxrResult || '',
+      inv.initialCxrDate || '',
+      inv.symptoms?.chronicCough ? inv.symptoms.coughDurationWeeks : 0,
+      inv.symptoms?.coughBlood ? 'มี' : 'ไม่มี',
+      inv.symptoms?.fever ? 'มี' : 'ไม่มี',
+      inv.symptoms?.nightSweats ? 'มี' : 'ไม่มี',
+      inv.symptoms?.weightLoss ? 'มี' : 'ไม่มี',
+      inv.symptoms?.chestPain ? 'มี' : 'ไม่มี',
+      inv.symptoms?.fatigue ? 'มี' : 'ไม่มี',
+      hivLabel,
+      inv.comorbidities?.diabetes ? 'มี' : 'ไม่มี',
+      inv.comorbidities?.ckd ? 'มี' : 'ไม่มี',
+      inv.comorbidities?.smoking ? 'สูบ' : 'ไม่สูบ',
+      inv.comorbidities?.alcohol ? 'ดื่ม' : 'ไม่ดื่ม',
+      inv.comorbidities?.substanceAbuse ? 'มี' : 'ไม่มี',
+      prevTbLabel,
+      inv.livingConditions?.homeType || 'บ้านเดี่ยว',
+      inv.livingConditions?.ventilation || 'ดี (โปร่ง ถ่ายเทดี)',
+      inv.livingConditions?.totalResidents || 1,
+      inv.householdContactsCount || 0,
+      inv.under5ContactsCount || 0,
+      inv.nonHouseholdContactsCount || 0,
+      inv.riskAssessmentNotes || '',
+      inv.controlMeasures || '',
+      inv.supervisorReviewerName || '',
+      inv.recordedAt || new Date().toISOString(),
+    ];
+  });
+
+  const contactRows = data.contacts.map(contact => {
+    const genderLabel = contact.gender === 'female' ? 'หญิง' : contact.gender === 'other' ? 'อื่นๆ' : 'ชาย';
+    const typeLabel = contact.contactType === 'household' ? 'กลุ่มร่วมบ้าน (Household)' : 'กลุ่มนอกบ้าน (Non-household)';
+    const protocolLabel = contact.age > 5 ? 'อายุ > 5 ปี: CXR 4 ครั้ง (0, 6, 12, 18 เดือน)' : 'อายุ ≤ 5 ปี: ตรวจ IGRA / ให้ยาป้องกัน TPT';
+    const ntipLabel = contact.ntipStatus === 'entered' ? 'คีย์แล้ว' : 'ยังไม่ได้คีย์';
+    return [
+      contact.id,
+      contact.indexPatientId,
+      contact.indexPatientHN,
+      contact.indexPatientName,
+      typeLabel,
+      contact.relationship,
+      contact.hn,
+      contact.fullName,
+      genderLabel,
+      contact.age,
+      contact.treatmentRights,
+      contact.phone,
+      contact.email,
+      protocolLabel,
+      ntipLabel,
+      contact.ntipKeyCode || '',
+      contact.ntipKeyDate || '',
+      contact.screeningStatus,
+      contact.notes || '',
+      contact.createdAt || new Date().toISOString(),
+      contact.lastUpdatedBy || '',
+      contact.updatedAt || new Date().toISOString(),
+      contact.ntipNotes || '',
+      contact.cxrStatus || '',
+      contact.cxrRound || '',
+      contact.cxrDate || '',
+      contact.cxrResult || '',
+      contact.cxrResultDetail || '',
+      contact.cxrHospital || '',
+      contact.nextCxrDate || '',
+    ];
+  });
+
+  const followUpRows = data.followUps.map(fu => [
+    fu.id,
+    fu.contactId,
+    fu.indexPatientHN,
+    fu.contactHN,
+    fu.contactName,
+    fu.contactAge,
+    fu.stepType,
+    fu.scheduledDate,
+    fu.actualDate || '',
+    fu.status,
+    fu.testResult || 'pending',
+    fu.resultDetail || '',
+    fu.tptRegimen || 'none',
+    fu.hospitalOrFacility || '',
+    fu.recordedBy,
+    fu.notes || '',
+  ]);
+
+  const logRows = data.logs.map(log => [
+    log.id,
+    log.patientId,
+    log.date,
+    log.takenMedication ? 'ทานแล้ว' : 'ยังไม่ได้ทาน/ขาดทานยา',
+    log.medicationTime || '',
+    supervisorMap[log.supervisorType] || log.supervisorType,
+    log.supervisorName || '',
+    log.symptoms.cough ? 'มี' : 'ไม่มี',
+    log.symptoms.coughBlood ? 'มี' : 'ไม่มี',
+    log.symptoms.fever ? 'มี' : 'ไม่มี',
+    log.symptoms.nightSweats ? 'มี' : 'ไม่มี',
+    log.symptoms.weightLoss ? 'มี' : 'ไม่มี',
+    log.symptoms.chestPain ? 'มี' : 'ไม่มี',
+    log.symptoms.fatigue ? 'มี' : 'ไม่มี',
+    log.symptoms.nauseaVomiting ? 'มี' : 'ไม่มี',
+    log.symptoms.rashItch ? 'มี' : 'ไม่มี',
+    log.symptoms.yellowSkinEyes ? 'มี' : 'ไม่มี',
+    log.symptoms.jointPain ? 'มี' : 'ไม่มี',
+    log.symptoms.visionChanges ? 'มี' : 'ไม่มี',
+    log.symptoms.numbnessHandsFeet ? 'มี' : 'ไม่มี',
+    log.severityLevel,
+    log.sideEffectsNotes || '',
+    log.patientMood || 'neutral',
+    log.recordedBy,
+    log.recordedAt || new Date().toISOString(),
+  ]);
+
+  const batchUpdates: { range: string; values: any[][] }[] = [];
+
+  if (patientRows.length > 0) {
+    batchUpdates.push({
+      range: `'${PATIENTS_SHEET_NAME}'!A2:AA${patientRows.length + 1}`,
+      values: patientRows,
+    });
+  }
+
+  if (investigationRows.length > 0) {
+    batchUpdates.push({
+      range: `'${INVESTIGATION_SHEET_NAME}'!A2:AQ${investigationRows.length + 1}`,
+      values: investigationRows,
+    });
+  }
+
+  if (contactRows.length > 0) {
+    batchUpdates.push({
+      range: `'${CONTACTS_SHEET_NAME}'!A2:V${contactRows.length + 1}`,
+      values: contactRows,
+    });
+  }
+
+  if (followUpRows.length > 0) {
+    batchUpdates.push({
+      range: `'${FOLLOW_UPS_SHEET_NAME}'!A2:P${followUpRows.length + 1}`,
+      values: followUpRows,
+    });
+  }
+
+  if (logRows.length > 0) {
+    batchUpdates.push({
+      range: `'${DAILY_LOGS_SHEET_NAME}'!A2:Y${logRows.length + 1}`,
+      values: logRows,
+    });
+  }
+
+  if (batchUpdates.length > 0) {
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        valueInputOption: 'USER_ENTERED',
+        data: batchUpdates,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || 'ไม่สามารถส่งข้อมูลทั้งหมดไปยัง Google Sheet ได้');
+    }
+  }
+
+  const totalCount = patientRows.length + investigationRows.length + contactRows.length + logRows.length;
+  return { success: true, count: totalCount };
+}
+
 export async function clearAllSheetData(accessToken: string, spreadsheetId: string): Promise<void> {
   try {
     const ranges = [

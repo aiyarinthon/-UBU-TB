@@ -21,7 +21,8 @@ import {
   deleteContactFromSheet,
   saveFollowUpToSheet,
   createTBSheet,
-  clearAllSheetData
+  clearAllSheetData,
+  pushAllLocalDataToSheet
 } from './lib/sheetsApi';
 import { 
   Patient, 
@@ -359,6 +360,50 @@ export default function App() {
     showToast('success', 'บันทึกการเชื่อมโยง Google Sheet สำเร็จแล้ว');
   };
 
+  // Push all local data into Google Sheet
+  const handlePushAllToSheet = async () => {
+    if (!spreadsheetId) {
+      showToast('error', 'กรุณาเชื่อมโยง Google Sheet ก่อนส่งข้อมูล');
+      return;
+    }
+
+    let activeToken = token;
+    if (!activeToken) {
+      try {
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (authErr: any) {
+        showToast('error', 'จำเป็นต้องให้สิทธิ์ Google OAuth เพื่อส่งข้อมูลลง Google Sheet (กรุณากด "เชื่อมต่อสิทธิ์ Google")');
+        return;
+      }
+    }
+
+    if (!activeToken) {
+      showToast('error', 'ไม่พบสิทธิ์ Google OAuth กรุณากดยืนยันสิทธิ์ Google ก่อน');
+      return;
+    }
+
+    setIsDataLoading(true);
+    try {
+      const res = await pushAllLocalDataToSheet(activeToken, spreadsheetId, {
+        patients,
+        investigations,
+        contacts,
+        followUps,
+        logs: dailyLogs
+      });
+      showToast('success', `ส่งข้อมูลทั้งหมดขึ้น Google Sheet สำเร็จแล้ว (${patients.length} ผู้ป่วย, ${contacts.length} ผู้สัมผัส, ${dailyLogs.length} บันทึกยา)`);
+    } catch (err: any) {
+      console.error('Error pushing data to sheet:', err);
+      showToast('error', `ไม่สามารถส่งข้อมูลขึ้น Google Sheet ได้: ${err.message}`);
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
+
   // 1. Save/Update Patient (Auto-syncs to Google Sheet)
   const handleSavePatient = async (patientData: Patient) => {
     const isEdit = patients.some(p => p.id === patientData.id);
@@ -369,19 +414,32 @@ export default function App() {
       setPatients(prev => [patientData, ...prev]);
     }
 
-    if (token && spreadsheetId) {
+    let activeToken = token;
+    if (!activeToken && spreadsheetId) {
+      try {
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (activeToken && spreadsheetId) {
       try {
         if (isEdit) {
-          await updatePatientInSheet(token, spreadsheetId, patientData);
+          await updatePatientInSheet(activeToken, spreadsheetId, patientData);
         } else {
-          await appendPatientToSheet(token, spreadsheetId, patientData);
+          await appendPatientToSheet(activeToken, spreadsheetId, patientData);
         }
-        showToast('success', `บันทึกข้อมูลผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) และบันทึกลง Google Sheet สำเร็จ`);
+        showToast('success', `บันทึกข้อมูลผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) ลง Google Sheet สำเร็จ`);
       } catch (err: any) {
         console.error('Auto-sync patient error:', err);
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
-    } else if (spreadsheetId && !token) {
+    } else if (spreadsheetId && !activeToken) {
       showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
     } else {
       showToast('success', `บันทึกข้อมูลผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) เรียบร้อยแล้ว`);
@@ -415,15 +473,28 @@ export default function App() {
   const handleSaveDailyLog = async (logData: DailyLog) => {
     setDailyLogs(prev => [logData, ...prev]);
 
-    if (token && spreadsheetId) {
+    let activeToken = token;
+    if (!activeToken && spreadsheetId) {
       try {
-        await appendDailyLogToSheet(token, spreadsheetId, logData);
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (activeToken && spreadsheetId) {
+      try {
+        await appendDailyLogToSheet(activeToken, spreadsheetId, logData);
         showToast('success', `บันทึกการทานยาวันที่ ${logData.date} และบันทึกลง Google Sheet สำเร็จ`);
       } catch (err: any) {
         console.error('Auto-sync log error:', err);
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
-    } else if (spreadsheetId && !token) {
+    } else if (spreadsheetId && !activeToken) {
       showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
     } else {
       showToast('success', `บันทึกการทานยาวันที่ ${logData.date} เรียบร้อยแล้ว`);
@@ -455,15 +526,28 @@ export default function App() {
       return p;
     }));
 
-    if (token && spreadsheetId) {
+    let activeToken = token;
+    if (!activeToken && spreadsheetId) {
       try {
-        await saveInvestigationToSheet(token, spreadsheetId, invData);
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (activeToken && spreadsheetId) {
+      try {
+        await saveInvestigationToSheet(activeToken, spreadsheetId, invData);
         showToast('success', `บันทึกใบสอบสวนโรคผู้ป่วย ${invData.patientName} และบันทึกลง Google Sheet สำเร็จ`);
       } catch (err: any) {
         console.error('Auto-sync investigation error:', err);
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
-    } else if (spreadsheetId && !token) {
+    } else if (spreadsheetId && !activeToken) {
       showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
     } else {
       showToast('success', `บันทึกใบสอบสวนโรคผู้ป่วย ${invData.patientName} เรียบร้อยแล้ว`);
@@ -479,15 +563,28 @@ export default function App() {
       setContacts(prev => [contactData, ...prev]);
     }
 
-    if (token && spreadsheetId) {
+    let activeToken = token;
+    if (!activeToken && spreadsheetId) {
       try {
-        await saveContactToSheet(token, spreadsheetId, contactData);
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (activeToken && spreadsheetId) {
+      try {
+        await saveContactToSheet(activeToken, spreadsheetId, contactData);
         showToast('success', `${isEdit ? 'อัปเดต' : 'เพิ่ม'}ข้อมูลผู้สัมผัส ${contactData.fullName} และบันทึกลง Google Sheet สำเร็จ`);
       } catch (err: any) {
         console.error('Auto-sync contact error:', err);
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
-    } else if (spreadsheetId && !token) {
+    } else if (spreadsheetId && !activeToken) {
       showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
     } else {
       showToast('success', `บันทึกข้อมูลผู้สัมผัส ${contactData.fullName} เรียบร้อยแล้ว`);
@@ -555,18 +652,31 @@ export default function App() {
       return c;
     }));
 
-    if (token && spreadsheetId) {
+    let activeToken = token;
+    if (!activeToken && spreadsheetId) {
       try {
-        await saveFollowUpToSheet(token, spreadsheetId, followUpData);
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (activeToken && spreadsheetId) {
+      try {
+        await saveFollowUpToSheet(activeToken, spreadsheetId, followUpData);
         if (contactToUpdate) {
-          await saveContactToSheet(token, spreadsheetId, contactToUpdate);
+          await saveContactToSheet(activeToken, spreadsheetId, contactToUpdate);
         }
         showToast('success', `บันทึกผลการตรวจ (${followUpData.stepType}) และบันทึกลง Google Sheet สำเร็จ`);
       } catch (err: any) {
         console.error('Auto-sync follow-up error:', err);
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
-    } else if (spreadsheetId && !token) {
+    } else if (spreadsheetId && !activeToken) {
       showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
     } else {
       showToast('success', `บันทึกผลการตรวจ (${followUpData.stepType}) เรียบร้อยแล้ว`);
@@ -716,6 +826,7 @@ export default function App() {
               spreadsheetName={spreadsheetName}
               onConfigChange={handleConfigChange}
               onRefreshData={loadSheetData}
+              onPushAllData={handlePushAllToSheet}
               isLoading={isDataLoading}
               onTokenUpdate={(newToken) => setToken(newToken)}
             />
