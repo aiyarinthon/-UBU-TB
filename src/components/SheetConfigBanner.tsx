@@ -178,16 +178,37 @@ export const SheetConfigBanner: React.FC<Props> = ({
             <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl text-left">
               <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
                 <TableProperties className="w-5 h-5 text-emerald-600" />
-                เชื่อมโยง Google Sheet ที่มีอยู่
+                เชื่อมโยง Google Sheet ของคุณ
               </h3>
-              <p className="text-xs text-slate-500 mb-4">
-                วาง Google Sheet URL หรือ Spreadsheet ID ของคุณ ระบบจะสร้างชีทที่จำเป็นให้โดยอัตโนมัติ
+              <p className="text-xs text-slate-500 mb-3">
+                คุณสามารถสร้าง Google Sheet ใหม่ หรือใช้ Sheet ที่มีอยู่แล้วได้ง่ายๆ
               </p>
+
+              <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200/80 rounded-xl text-xs text-emerald-900 space-y-1.5">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>💡 วิธีที่ง่ายที่สุด (ทำได้ใน 3 ขั้นตอน):</span>
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-slate-700 pl-1 text-xs">
+                  <li>
+                    <a
+                      href="https://sheets.new"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-emerald-700 underline inline-flex items-center gap-1 hover:text-emerald-900"
+                    >
+                      <span>คลิกที่นี่เพื่อเปิดสร้าง Google Sheet ใหม่ (sheets.new)</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </li>
+                  <li>คัดลอกลิงก์ (URL) จากแถบเบราว์เซอร์ของหน้า Sheet นั้น</li>
+                  <li>นำลิงก์มาวางในช่องด้านล่าง แล้วกด "เชื่อมโยงชีท"</li>
+                </ol>
+              </div>
 
               <form onSubmit={handleLinkExistingSheet} className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Google Spreadsheet URL หรือ ID
+                    วาง Google Sheet URL หรือ Spreadsheet ID
                   </label>
                   <input
                     type="text"
@@ -210,9 +231,9 @@ export const SheetConfigBanner: React.FC<Props> = ({
                   <button
                     type="submit"
                     disabled={isLinking || !customSheetId.trim()}
-                    className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg disabled:opacity-50 flex items-center gap-2"
+                    className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg disabled:opacity-50 flex items-center gap-2 cursor-pointer"
                   >
-                    {isLinking ? 'กำลังตรวจสอบ...' : 'เชื่อมโยงชีท'}
+                    {isLinking ? 'กำลังบันทึก...' : 'เชื่อมโยงชีท'}
                   </button>
                 </div>
               </form>
