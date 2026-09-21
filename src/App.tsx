@@ -21,6 +21,7 @@ import {
   deleteContactFromSheet,
   saveFollowUpToSheet,
   createTBSheet,
+  findOrCreateTBSheet,
   clearAllSheetData,
   pushAllLocalDataToSheet
 } from './lib/sheetsApi';
@@ -82,15 +83,40 @@ import {
 const STORAGE_SHEET_KEY = 'tb_care_spreadsheet_config';
 
 export default function App() {
-  // Start with no active session on initial load so user must log in every time
-  const [currentUser, setCurrentUser] = useState<User | any>(null);
-  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | any>(() => {
+    const saved = localStorage.getItem('tb_care_active_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return null; }
+    }
+    return null;
+  });
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(() => {
+    const saved = localStorage.getItem('tb_care_active_user');
+    if (saved) {
+      try { 
+        const u = JSON.parse(saved);
+        return resolveUserProfile(u);
+      } catch (e) { return null; }
+    }
+    return null;
+  });
 
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(() => {
+    return localStorage.getItem('tb_care_google_token') || null;
+  });
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isBackendAdminModalOpen, setIsBackendAdminModalOpen] = useState(false);
+
+  // Sync token changes to localStorage
+  useEffect(() => {
+    if (token) {
+      localStorage.setItem('tb_care_google_token', token);
+    } else {
+      localStorage.removeItem('tb_care_google_token');
+    }
+  }, [token]);
 
   // Spreadsheet State
   const [spreadsheetId, setSpreadsheetId] = useState<string | null>(() => {
@@ -141,6 +167,58 @@ export default function App() {
   });
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [statusNotification, setStatusNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // 1-Minute Auto-Sync States
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('tb_care_auto_sync_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [nextSyncCountdown, setNextSyncCountdown] = useState<number>(60);
+  const [isAutoSyncing, setIsAutoSyncing] = useState<boolean>(false);
+
+  // Save auto-sync preference
+  useEffect(() => {
+    localStorage.setItem('tb_care_auto_sync_enabled', String(isAutoSyncEnabled));
+  }, [isAutoSyncEnabled]);
+
+  // Periodic Auto-Sync Every 1 Minute (60 seconds)
+  useEffect(() => {
+    if (!isAutoSyncEnabled || !spreadsheetId) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setNextSyncCountdown((prev) => {
+        if (prev <= 1) {
+          // Time to trigger auto-sync to Google Sheet
+          if (token && spreadsheetId && !isAutoSyncing && !isDataLoading) {
+            (async () => {
+              setIsAutoSyncing(true);
+              try {
+                await pushAllLocalDataToSheet(token, spreadsheetId, {
+                  patients,
+                  investigations,
+                  contacts,
+                  followUps,
+                  logs: dailyLogs
+                });
+                setLastSyncTime(new Date());
+              } catch (e: any) {
+                console.warn('Auto-sync 1-min background push error:', e);
+              } finally {
+                setIsAutoSyncing(false);
+              }
+            })();
+          }
+          return 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isAutoSyncEnabled, spreadsheetId, token, isAutoSyncing, isDataLoading, patients, investigations, contacts, followUps, dailyLogs]);
 
   // Sync to local storage
   useEffect(() => {
@@ -341,9 +419,50 @@ export default function App() {
     }
   }, [token, spreadsheetId, selectedPatient?.id]);
 
+  // Auto-connect to Google Sheet
+  const handleAutoConnectGoogleSheet = useCallback(async (activeToken: string) => {
+    setIsDataLoading(true);
+    try {
+      const sheet = await findOrCreateTBSheet(activeToken);
+      setSpreadsheetId(sheet.spreadsheetId);
+      setSpreadsheetUrl(sheet.spreadsheetUrl);
+      setSpreadsheetName(sheet.title);
+      localStorage.setItem(`${STORAGE_SHEET_KEY}_id`, sheet.spreadsheetId);
+      localStorage.setItem(`${STORAGE_SHEET_KEY}_url`, sheet.spreadsheetUrl);
+      localStorage.setItem(`${STORAGE_SHEET_KEY}_name`, sheet.title);
+
+      showToast('success', sheet.isNew 
+        ? `✨ สร้างและเชื่อมต่อ Google Sheet ใหม่เรียบร้อยแล้ว ("${sheet.title}")`
+        : `🔗 เชื่อมต่อ Google Sheet ที่มีอยู่ใน Google Drive อัตโนมัติแล้ว ("${sheet.title}")`
+      );
+
+      // If new sheet and local data exists, push all data
+      if (sheet.isNew && (patients.length > 0 || contacts.length > 0)) {
+        await pushAllLocalDataToSheet(activeToken, sheet.spreadsheetId, {
+          patients,
+          investigations,
+          contacts,
+          followUps,
+          logs: dailyLogs
+        });
+      } else {
+        await loadSheetData();
+      }
+    } catch (err: any) {
+      console.warn('Auto-connect sheet error:', err);
+    } finally {
+      setIsDataLoading(false);
+    }
+  }, [patients, contacts, investigations, followUps, dailyLogs, loadSheetData]);
+
   useEffect(() => {
-    if (token && spreadsheetId) {
-      loadSheetData();
+    if (token) {
+      if (spreadsheetId) {
+        loadSheetData();
+      } else {
+        // Automatically find or create Google Sheet on login
+        handleAutoConnectGoogleSheet(token);
+      }
     }
   }, [token, spreadsheetId]);
 
@@ -563,6 +682,19 @@ export default function App() {
       setContacts(prev => [contactData, ...prev]);
     }
 
+    // Keep index patient contact counts in sync
+    setPatients(prev => prev.map(p => {
+      if (p.id === contactData.indexPatientId || (contactData.indexPatientHN && p.hn === contactData.indexPatientHN)) {
+        const isHousehold = contactData.contactType === 'household';
+        return {
+          ...p,
+          householdContactsCount: isHousehold ? Math.max(0, (p.householdContactsCount || 0) + (isEdit ? 0 : 1)) : p.householdContactsCount,
+          nonHouseholdContactsCount: !isHousehold ? Math.max(0, (p.nonHouseholdContactsCount || 0) + (isEdit ? 0 : 1)) : p.nonHouseholdContactsCount,
+        };
+      }
+      return p;
+    }));
+
     let activeToken = token;
     if (!activeToken && spreadsheetId) {
       try {
@@ -596,6 +728,20 @@ export default function App() {
     const target = contacts.find(c => c.id === contactId);
     setContacts(prev => prev.filter(c => c.id !== contactId));
     setFollowUps(prev => prev.filter(f => f.contactId !== contactId));
+
+    if (target) {
+      setPatients(prev => prev.map(p => {
+        if (p.id === target.indexPatientId || (target.indexPatientHN && p.hn === target.indexPatientHN)) {
+          const isHousehold = target.contactType === 'household';
+          return {
+            ...p,
+            householdContactsCount: isHousehold ? Math.max(0, (p.householdContactsCount || 1) - 1) : p.householdContactsCount,
+            nonHouseholdContactsCount: !isHousehold ? Math.max(0, (p.nonHouseholdContactsCount || 1) - 1) : p.nonHouseholdContactsCount,
+          };
+        }
+        return p;
+      }));
+    }
 
     if (token && spreadsheetId) {
       try {
@@ -829,6 +975,11 @@ export default function App() {
               onPushAllData={handlePushAllToSheet}
               isLoading={isDataLoading}
               onTokenUpdate={(newToken) => setToken(newToken)}
+              isAutoSyncEnabled={isAutoSyncEnabled}
+              onToggleAutoSync={(enabled) => setIsAutoSyncEnabled(enabled)}
+              lastSyncTime={lastSyncTime}
+              nextSyncCountdown={nextSyncCountdown}
+              isAutoSyncing={isAutoSyncing}
             />
 
             {/* Primary Navigation Tabs - Always Accessible */}
@@ -1066,6 +1217,7 @@ export default function App() {
             onSave={handleSavePatient}
             initialData={editingPatient}
             currentUserProfile={currentUserProfile}
+            existingPatients={patients}
           />
         )}
 

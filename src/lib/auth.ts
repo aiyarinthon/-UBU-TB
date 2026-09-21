@@ -21,12 +21,14 @@ export const SCOPES = [
 const provider = new GoogleAuthProvider();
 SCOPES.forEach(scope => provider.addScope(scope));
 provider.setCustomParameters({
-  prompt: 'consent',
-  access_type: 'offline'
+  prompt: 'select_account',
 });
 
+const TOKEN_STORAGE_KEY = 'tb_care_google_token';
+const TOKEN_TIME_KEY = 'tb_care_google_token_time';
+
 let isSigningIn = false;
-let cachedAccessToken: string | null = null;
+let cachedAccessToken: string | null = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -34,15 +36,21 @@ export const initAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      const savedToken = cachedAccessToken || localStorage.getItem(TOKEN_STORAGE_KEY);
+      if (savedToken) {
+        cachedAccessToken = savedToken;
+        if (onAuthSuccess) onAuthSuccess(user, savedToken);
       } else if (!isSigningIn) {
-        cachedAccessToken = null;
         if (onAuthFailure) onAuthFailure();
       }
     } else {
-      cachedAccessToken = null;
-      if (onAuthFailure) onAuthFailure();
+      const savedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+      if (savedToken && onAuthSuccess) {
+        // Fallback if local session exists
+        cachedAccessToken = savedToken;
+      } else if (onAuthFailure) {
+        onAuthFailure();
+      }
     }
   });
 };
@@ -57,6 +65,13 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
+    try {
+      localStorage.setItem(TOKEN_STORAGE_KEY, cachedAccessToken);
+      localStorage.setItem(TOKEN_TIME_KEY, Date.now().toString());
+    } catch (e) {
+      console.warn('Could not save token to localStorage:', e);
+    }
+
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
@@ -74,10 +89,20 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+  if (cachedAccessToken) return cachedAccessToken;
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem(TOKEN_STORAGE_KEY);
+  }
+  return null;
 };
 
 export const logout = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TOKEN_TIME_KEY);
+  } catch (e) {
+    // ignore
+  }
 };

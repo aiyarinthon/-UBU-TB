@@ -248,7 +248,7 @@ export async function createTBSheet(accessToken: string, customTitle?: string): 
           values: [INVESTIGATION_HEADERS],
         },
         {
-          range: `'${CONTACTS_SHEET_NAME}'!A1:T1`,
+          range: `'${CONTACTS_SHEET_NAME}'!A1:AD1`,
           values: [CONTACT_HEADERS],
         },
         {
@@ -264,6 +264,33 @@ export async function createTBSheet(accessToken: string, customTitle?: string): 
   });
 
   return { spreadsheetId, spreadsheetUrl, title };
+}
+
+export async function findOrCreateTBSheet(
+  accessToken: string
+): Promise<{ spreadsheetId: string; spreadsheetUrl: string; title: string; isNew: boolean }> {
+  try {
+    const q = encodeURIComponent("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false and (name contains 'ระบบสอบสวนและติดตามกลุ่มเสี่ยงวัณโรคปอด' or name contains 'TB Patient Care Tracker Database')");
+    const driveRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&orderBy=modifiedTime desc&pageSize=1`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (driveRes.ok) {
+      const driveData = await driveRes.json();
+      if (driveData.files && driveData.files.length > 0) {
+        const found = driveData.files[0];
+        const spreadsheetId = found.id;
+        const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+        await verifyAndInitSheets(accessToken, spreadsheetId);
+        return { spreadsheetId, spreadsheetUrl, title: found.name, isNew: false };
+      }
+    }
+  } catch (err) {
+    console.warn('Drive search fallback:', err);
+  }
+
+  const created = await createTBSheet(accessToken, 'ระบบสอบสวนและติดตามกลุ่มเสี่ยงวัณโรคปอด โรงพยาบาลมหาวิทยาลัยอุบลราชธานี');
+  return { ...created, isNew: true };
 }
 
 export async function verifyAndInitSheets(accessToken: string, spreadsheetId: string): Promise<boolean> {
@@ -301,7 +328,7 @@ export async function verifyAndInitSheets(accessToken: string, spreadsheetId: st
       title: CONTACTS_SHEET_NAME,
       color: { red: 0.6, green: 0.2, blue: 0.8 },
       headers: CONTACT_HEADERS,
-      range: `'${CONTACTS_SHEET_NAME}'!A1:V1`,
+      range: `'${CONTACTS_SHEET_NAME}'!A1:AD1`,
     });
   }
   if (!existingSheets.includes(FOLLOW_UPS_SHEET_NAME)) {
@@ -399,21 +426,31 @@ export async function fetchAllPatients(accessToken: string, spreadsheetId: strin
   const data = await res.json();
   const rows = data.values || [];
 
-  return rows.map((row: string[]): Patient => {
+  const rawList = rows.map((row: string[], idx: number): Patient | null => {
+    const rawHn = (row[1] || '').trim();
+    const rawName = (row[2] || '').trim();
+
+    // Skip empty or header rows
+    if (!rawHn && !rawName) return null;
+    if (rawName === 'ชื่อ-นามสกุล' || rawHn === 'HN') return null;
+
+    const rawId = (row[0] || '').trim();
+    const patientId = rawId || (rawHn ? `TB-${rawHn}` : `TB-${Date.now()}-${idx}`);
+
     const emergencyRaw = row[12] || '';
     const [emName, emPhone] = emergencyRaw.split(' - ');
 
     return {
-      id: row[0] || '',
-      hn: row[1] || '',
-      fullName: row[2] || '',
-      phone: row[3] || '',
-      email: row[4] || '',
+      id: patientId,
+      hn: rawHn,
+      fullName: rawName,
+      phone: (row[3] || '').trim(),
+      email: (row[4] || '').trim(),
       ntipRegistrationDate: row[5] || '',
       diagnosisDate: row[6] || '',
       age: Number(row[7]) || 0,
       gender: (row[8] === 'หญิง' || row[8] === 'female' ? 'female' : row[8] === 'อื่นๆ' ? 'other' : 'male'),
-      nationalId: row[9] || '',
+      nationalId: (row[9] || '').trim(),
       treatmentRights: row[10] || 'บัตรทอง (UC)',
       address: row[11] || '',
       emergencyContact: {
@@ -436,10 +473,47 @@ export async function fetchAllPatients(accessToken: string, spreadsheetId: strin
       lastUpdatedBy: row[25] || '',
       updatedAt: row[26] || row[24] || '',
     };
-  }).filter((p: Patient) => p.id && p.fullName);
+  }).filter((p): p is Patient => p !== null && (!!p.fullName || !!p.hn));
+
+  // Deduplicate array by HN or ID (keep latest or most complete)
+  const mapByHnOrId = new Map<string, Patient>();
+  for (const p of rawList) {
+    const key = p.hn ? `hn:${p.hn.toLowerCase()}` : `id:${p.id}`;
+    mapByHnOrId.set(key, p);
+  }
+
+  return Array.from(mapByHnOrId.values());
 }
 
 export async function appendPatientToSheet(accessToken: string, spreadsheetId: string, patient: Patient): Promise<void> {
+  // Check if patient already exists in sheet by ID or HN or National ID
+  const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(PATIENTS_SHEET_NAME, 'A:J')}`;
+  const checkRes = await fetch(checkUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+  
+  if (checkRes.ok) {
+    const checkData = await checkRes.json();
+    const rows: string[][] = checkData.values || [];
+    const patientHnClean = (patient.hn || '').trim().toLowerCase();
+    const patientNatClean = (patient.nationalId || '').trim();
+
+    const existingRowIndex = rows.findIndex((r, idx) => {
+      if (idx === 0) return false;
+      const rowId = (r[0] || '').trim();
+      const rowHn = (r[1] || '').trim().toLowerCase();
+      const rowNat = (r[9] || '').trim();
+      return (
+        (patient.id && rowId === patient.id) ||
+        (patientHnClean && rowHn === patientHnClean) ||
+        (patientNatClean && patientNatClean.length === 13 && rowNat === patientNatClean)
+      );
+    });
+
+    if (existingRowIndex !== -1) {
+      // Patient already exists in sheet! Update that row instead of creating duplicate
+      return updatePatientInSheet(accessToken, spreadsheetId, patient);
+    }
+  }
+
   const genderMap: Record<string, string> = { male: 'ชาย', female: 'หญิง', other: 'อื่นๆ' };
   const values = [
     [
@@ -494,7 +568,7 @@ export async function appendPatientToSheet(accessToken: string, spreadsheetId: s
 }
 
 export async function updatePatientInSheet(accessToken: string, spreadsheetId: string, patient: Patient): Promise<void> {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(PATIENTS_SHEET_NAME, 'A:A')}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(PATIENTS_SHEET_NAME, 'A:J')}`;
   let res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) {
     await verifyAndInitSheets(accessToken, spreadsheetId);
@@ -503,8 +577,21 @@ export async function updatePatientInSheet(accessToken: string, spreadsheetId: s
   if (!res.ok) throw new Error('ไม่สามารถค้นหาแถวข้อมูลผู้ป่วยได้');
   
   const data = await res.json();
-  const rows = data.values || [];
-  const rowIndex = rows.findIndex((r: string[]) => r[0] === patient.id);
+  const rows: string[][] = data.values || [];
+  const patientHnClean = (patient.hn || '').trim().toLowerCase();
+  const patientNatClean = (patient.nationalId || '').trim();
+
+  const rowIndex = rows.findIndex((r, idx) => {
+    if (idx === 0) return false;
+    const rowId = (r[0] || '').trim();
+    const rowHn = (r[1] || '').trim().toLowerCase();
+    const rowNat = (r[9] || '').trim();
+    return (
+      (patient.id && rowId === patient.id) ||
+      (patientHnClean && rowHn === patientHnClean) ||
+      (patientNatClean && patientNatClean.length === 13 && rowNat === patientNatClean)
+    );
+  });
 
   if (rowIndex === -1) {
     return appendPatientToSheet(accessToken, spreadsheetId, patient);
@@ -538,7 +625,7 @@ export async function updatePatientInSheet(accessToken: string, spreadsheetId: s
       patient.investigationStatus || 'pending',
       patient.status,
       patient.notes || '',
-      patient.createdAt,
+      patient.createdAt || new Date().toISOString(),
       patient.lastUpdatedBy || '',
       patient.updatedAt || new Date().toISOString(),
     ],
@@ -724,26 +811,64 @@ export async function saveInvestigationToSheet(accessToken: string, spreadsheetI
 
 export async function fetchAllContacts(accessToken: string, spreadsheetId: string): Promise<ContactPerson[]> {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(CONTACTS_SHEET_NAME, 'A2:AD5000')}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!res.ok) return [];
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) {
+    try {
+      await verifyAndInitSheets(accessToken, spreadsheetId);
+      res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    } catch (e) {
+      console.warn('Contacts auto-init retry fallback:', e);
+    }
+    if (!res.ok) return [];
+  }
 
-  const data = await res.json();
-  const rows = data.values || [];
+  const data = await res.json().catch(() => ({}));
+  const rows: string[][] = data.values || [];
 
-  return rows.map((row: string[]): ContactPerson => {
+  const rawList = rows.map((row: string[], idx: number): ContactPerson | null => {
+    if (!row || row.length === 0 || row.every(cell => !cell || !cell.trim())) {
+      return null;
+    }
+
+    const rawId = (row[0] || '').trim();
+    const rawIndexId = (row[1] || '').trim();
+    const rawIndexHn = (row[2] || '').trim();
+    const rawIndexName = (row[3] || '').trim();
+    const rawType = (row[4] || '').trim();
+    const rawRelationship = (row[5] || '').trim();
+    const rawHn = (row[6] || '').trim();
+    const rawFullName = (row[7] || '').trim();
+
+    // Skip if header row
+    if (
+      rawFullName === 'ชื่อ-นามสกุล ผู้สัมผัส' ||
+      rawId.includes('รหัสผู้สัมผัส') ||
+      rawHn === 'HN ผู้สัมผัส' ||
+      rawIndexHn === 'HN ผู้ป่วยดัชนี'
+    ) {
+      return null;
+    }
+
+    // Determine fallback name & ID
+    const fullName = rawFullName || (rawHn && !/^\d+$/.test(rawHn) ? rawHn : '') || rawIndexName || rawId;
+    if (!fullName && !rawHn && !rawId) {
+      return null;
+    }
+
+    const contactId = rawId || (rawHn ? `CT-${rawHn}` : `CT-${Date.now()}-${idx + 1}`);
     const age = Number(row[9]) || 0;
     const protocol: 'cxr_4_times' | 'igra_tpt' = age > 5 ? 'cxr_4_times' : 'igra_tpt';
-    const cType: 'household' | 'non_household' = (row[4]?.includes('นอกบ้าน') || row[4] === 'non_household') ? 'non_household' : 'household';
+    const cType: 'household' | 'non_household' = (rawType.includes('นอกบ้าน') || rawType === 'non_household') ? 'non_household' : 'household';
 
     return {
-      id: row[0] || '',
-      indexPatientId: row[1] || '',
-      indexPatientHN: row[2] || '',
-      indexPatientName: row[3] || '',
+      id: contactId,
+      indexPatientId: rawIndexId,
+      indexPatientHN: rawIndexHn,
+      indexPatientName: rawIndexName,
       contactType: cType,
-      relationship: row[5] || '',
-      hn: row[6] || '',
-      fullName: row[7] || '',
+      relationship: rawRelationship || (cType === 'household' ? 'คนในครอบครัว' : 'เพื่อนร่วมงาน/คนรู้จัก'),
+      hn: rawHn || (rawId.startsWith('HN') ? rawId : ''),
+      fullName: fullName || 'ผู้สัมผัส (ไม่ระบุชื่อ)',
       gender: (row[8] === 'หญิง' || row[8] === 'female' ? 'female' : row[8] === 'อื่นๆ' ? 'other' : 'male'),
       age: age,
       treatmentRights: row[10] || 'บัตรทอง (UC)',
@@ -755,9 +880,9 @@ export async function fetchAllContacts(accessToken: string, spreadsheetId: strin
       ntipKeyDate: row[16] || '',
       screeningStatus: (row[17] as any) || 'pending_screening',
       notes: row[18] || '',
-      createdAt: row[19] || '',
+      createdAt: row[19] || new Date().toISOString(),
       lastUpdatedBy: row[20] || '',
-      updatedAt: row[21] || row[19] || '',
+      updatedAt: row[21] || row[19] || new Date().toISOString(),
       ntipNotes: row[22] || '',
       cxrStatus: (row[23] as any) || undefined,
       cxrRound: (row[24] as any) || undefined,
@@ -767,7 +892,16 @@ export async function fetchAllContacts(accessToken: string, spreadsheetId: strin
       cxrHospital: row[28] || '',
       nextCxrDate: row[29] || '',
     };
-  }).filter(c => c.id && c.fullName);
+  }).filter((c): c is ContactPerson => c !== null);
+
+  // Deduplicate by ID or (HN + IndexPatientHN)
+  const map = new Map<string, ContactPerson>();
+  for (const c of rawList) {
+    const key = c.hn ? `hn:${c.hn.toLowerCase()}-${(c.indexPatientHN || '').toLowerCase()}` : `id:${c.id}`;
+    map.set(key, c);
+  }
+
+  return Array.from(map.values());
 }
 
 export async function saveContactToSheet(accessToken: string, spreadsheetId: string, contact: ContactPerson): Promise<void> {
@@ -811,8 +945,8 @@ export async function saveContactToSheet(accessToken: string, spreadsheetId: str
     ],
   ];
 
-  // Check if exists
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(CONTACTS_SHEET_NAME, 'A:A')}`;
+  // Check if exists by ID, HN, or (FullName + IndexHN)
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(CONTACTS_SHEET_NAME, 'A:H')}`;
   let res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) {
     await verifyAndInitSheets(accessToken, spreadsheetId);
@@ -820,8 +954,24 @@ export async function saveContactToSheet(accessToken: string, spreadsheetId: str
   }
 
   const data = await res.json().catch(() => ({}));
-  const rows = data.values || [];
-  const rowIndex = rows.findIndex((r: string[]) => r[0] === contact.id);
+  const rows: string[][] = data.values || [];
+  const targetId = (contact.id || '').trim();
+  const targetHn = (contact.hn || '').trim().toLowerCase();
+  const targetName = (contact.fullName || '').trim().toLowerCase();
+  const targetIndexHn = (contact.indexPatientHN || '').trim().toLowerCase();
+
+  const rowIndex = rows.findIndex((r: string[], idx: number) => {
+    if (idx === 0) return false;
+    const rowId = (r[0] || '').trim();
+    const rowIndexHn = (r[2] || '').trim().toLowerCase();
+    const rowHn = (r[6] || '').trim().toLowerCase();
+    const rowName = (r[7] || '').trim().toLowerCase();
+
+    if (targetId && rowId === targetId) return true;
+    if (targetHn && rowHn === targetHn && (!targetIndexHn || rowIndexHn === targetIndexHn)) return true;
+    if (targetName && rowName === targetName && targetIndexHn && rowIndexHn === targetIndexHn) return true;
+    return false;
+  });
 
   if (rowIndex === -1) {
     const doAppend = () => fetch(
@@ -1298,7 +1448,7 @@ export async function pushAllLocalDataToSheet(
 
   if (contactRows.length > 0) {
     batchUpdates.push({
-      range: `'${CONTACTS_SHEET_NAME}'!A2:V${contactRows.length + 1}`,
+      range: `'${CONTACTS_SHEET_NAME}'!A2:AD${contactRows.length + 1}`,
       values: contactRows,
     });
   }

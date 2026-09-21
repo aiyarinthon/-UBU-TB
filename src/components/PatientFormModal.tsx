@@ -29,6 +29,7 @@ interface Props {
   initialData?: Patient | null;
   currentUserProfile?: UserProfile | null;
   currentUserName?: string;
+  existingPatients?: Patient[];
 }
 
 export const PatientFormModal: React.FC<Props> = ({
@@ -38,6 +39,7 @@ export const PatientFormModal: React.FC<Props> = ({
   initialData,
   currentUserProfile,
   currentUserName,
+  existingPatients = [],
 }) => {
   const isEditing = !!initialData;
   const [showCriteriaModal, setShowCriteriaModal] = useState(false);
@@ -83,11 +85,36 @@ export const PatientFormModal: React.FC<Props> = ({
     };
   });
 
+  // Duplicate Check against existing patients (excluding current patient when editing)
+  const duplicateMatch = React.useMemo(() => {
+    const inputHn = (formData.hn || '').trim().toLowerCase();
+    const inputNat = (formData.nationalId || '').trim();
+    const inputName = (formData.fullName || '').trim().toLowerCase();
+
+    if (!inputHn && !inputNat && !inputName) return null;
+
+    return existingPatients.find(p => {
+      if (initialData && p.id === initialData.id) return false;
+      const pHn = (p.hn || '').trim().toLowerCase();
+      const pNat = (p.nationalId || '').trim();
+      const pName = (p.fullName || '').trim().toLowerCase();
+
+      const matchHn = inputHn && pHn && inputHn === pHn;
+      const matchNat = inputNat && pNat && inputNat.length === 13 && inputNat === pNat;
+      const matchName = inputName && pName && inputName.length >= 4 && inputName === pName;
+
+      return matchHn || matchNat || matchName;
+    }) || null;
+  }, [formData.hn, formData.nationalId, formData.fullName, existingPatients, initialData]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.fullName || !formData.hn) {
+    const cleanHn = (formData.hn || '').trim();
+    const cleanName = (formData.fullName || '').trim();
+
+    if (!cleanName || !cleanHn) {
       setErrorMsg('กรุณากรอก HN และชื่อ-นามสกุลของผู้ป่วยให้ครบถ้วน');
       return;
     }
@@ -95,13 +122,18 @@ export const PatientFormModal: React.FC<Props> = ({
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
+      // If duplicate was matched and user is creating new, reuse the duplicate patient's ID to update in-place instead of creating duplicate
+      const targetId = isEditing 
+        ? (formData.id || initialData?.id || `TB-${Date.now()}`)
+        : (duplicateMatch?.id || formData.id || `TB-${Date.now()}`);
+
       const patientToSave: Patient = {
-        id: formData.id || `TB-${Date.now()}`,
-        hn: formData.hn!,
-        fullName: formData.fullName!,
-        phone: formData.phone || '',
-        email: formData.email || '',
-        nationalId: formData.nationalId || '',
+        id: targetId,
+        hn: cleanHn,
+        fullName: cleanName,
+        phone: (formData.phone || '').trim(),
+        email: (formData.email || '').trim(),
+        nationalId: (formData.nationalId || '').trim(),
         ntipRegistrationDate: formData.ntipRegistrationDate || new Date().toISOString().split('T')[0],
         diagnosisDate: formData.diagnosisDate || new Date().toISOString().split('T')[0],
         age: Number(formData.age) || 0,
@@ -121,12 +153,12 @@ export const PatientFormModal: React.FC<Props> = ({
         hospitalName: formData.hospitalName || '',
         householdContactsCount: Number(formData.householdContactsCount) || 0,
         nonHouseholdContactsCount: Number(formData.nonHouseholdContactsCount) || 0,
-        investigationStatus: formData.investigationStatus || 'pending',
-        status: formData.status || 'active',
-        notes: formData.notes || '',
+        investigationStatus: formData.investigationStatus || duplicateMatch?.investigationStatus || 'pending',
+        status: formData.status || duplicateMatch?.status || 'active',
+        notes: formData.notes || duplicateMatch?.notes || '',
         lastUpdatedBy: actorName,
         updatedAt: new Date().toISOString(),
-        createdAt: initialData?.createdAt || new Date().toISOString(),
+        createdAt: duplicateMatch?.createdAt || initialData?.createdAt || new Date().toISOString(),
       };
 
       await onSave(patientToSave);
@@ -167,6 +199,44 @@ export const PatientFormModal: React.FC<Props> = ({
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[78vh] overflow-y-auto">
+            {errorMsg && (
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-xs text-rose-800 font-medium">
+                <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {/* Duplicate Patient Alert & Quick-Load */}
+            {duplicateMatch && (
+              <div className="p-4 bg-amber-50 border border-amber-300/90 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-900 animate-in fade-in shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-amber-950 flex items-center gap-1.5 flex-wrap">
+                      <span>⚠️ ตรวจพบข้อมูลผู้ป่วยเดิมในระบบ (HN: {duplicateMatch.hn})</span>
+                      <span className="text-[10px] bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded font-bold">
+                        เคสเดิม
+                      </span>
+                    </div>
+                    <div className="text-amber-800 text-[11px] mt-0.5">
+                      ชื่อ: <strong>{duplicateMatch.fullName}</strong> | สิทธิ: {duplicateMatch.treatmentRights} | วันที่วินิจฉัย: {duplicateMatch.diagnosisDate || '-'}
+                    </div>
+                    <div className="text-amber-700 text-[11px] mt-1">
+                      💡 เมื่อคุณกดบันทึก ระบบจะ<strong>อัปเดตข้อมูลของเคสนี้</strong>โดยอัตโนมัติ เพื่อป้องกันการบันทึกเคสซ้ำซ้อน
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData({ ...duplicateMatch });
+                  }}
+                  className="px-3.5 py-1.5 bg-amber-200 hover:bg-amber-300 text-amber-950 rounded-xl font-bold text-xs whitespace-nowrap transition cursor-pointer flex-shrink-0 self-end sm:self-center border border-amber-300"
+                >
+                  📥 ดึงข้อมูลเดิมมาแก้ไข
+                </button>
+              </div>
+            )}
             {errorMsg && (
               <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-xs text-rose-800 font-medium">
                 <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />

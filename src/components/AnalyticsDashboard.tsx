@@ -33,7 +33,8 @@ import {
   CalendarClock,
   FileCheck2,
   FileSpreadsheet,
-  ChevronRight
+  ChevronRight,
+  BookOpen
 } from 'lucide-react';
 import { Patient, DailyLog, ContactPerson, ContactFollowUp, UserProfile } from '../types';
 import { ExecutiveKpiReportModal } from './ExecutiveKpiReportModal';
@@ -68,6 +69,16 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [isExecutiveModalOpen, setIsExecutiveModalOpen] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
+  const [showGuide, setShowGuide] = useState<boolean>(() => {
+    // If spreadsheet is already connected, hide guide by default unless user has saved preference
+    if (!spreadsheetId) return true;
+    return localStorage.getItem('tb_care_show_guide') === 'true';
+  });
+
+  const toggleGuide = (val: boolean) => {
+    setShowGuide(val);
+    localStorage.setItem('tb_care_show_guide', val ? 'true' : 'false');
+  };
 
   // Filter items according to selected date period
   const filterByDate = <T extends { date?: string; diagnosisDate?: string; createdAt?: string; scheduledDate?: string }>(items: T[]): T[] => {
@@ -255,12 +266,23 @@ export const AnalyticsDashboard: React.FC<Props> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
-      {/* 0. Getting Started & Setup Guide */}
-      <GettingStartedGuide
-        spreadsheetId={spreadsheetId}
-        spreadsheetUrl={spreadsheetUrl}
-        hasAccessToken={hasAccessToken}
-      />
+      {/* 0. Getting Started & Setup Guide (Collapsible/Hideable) */}
+      {showGuide && (
+        <div className="relative">
+          <GettingStartedGuide
+            spreadsheetId={spreadsheetId}
+            spreadsheetUrl={spreadsheetUrl}
+            hasAccessToken={hasAccessToken}
+          />
+          <button
+            onClick={() => toggleGuide(false)}
+            className="absolute top-4 right-4 px-2.5 py-1 bg-white/90 hover:bg-white text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
+            title="ซ่อนกล่องคู่มือเริ่มต้นนี้"
+          >
+            ซ่อนคู่มือ
+          </button>
+        </div>
+      )}
       
       {/* 1. Date Filter & Executive Action Toolbar */}
       <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -313,8 +335,19 @@ export const AnalyticsDashboard: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Right: Executive Report Trigger Button */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Right: Executive Report Trigger Button & Guide Toggle */}
+        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+          {!showGuide && (
+            <button
+              onClick={() => toggleGuide(true)}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer border border-slate-200"
+              title="แสดงคู่มือเริ่มต้นใช้งาน"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-teal-700" />
+              <span>คู่มือเริ่มต้น</span>
+            </button>
+          )}
+
           <button
             onClick={handleCopySummary}
             className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer border border-slate-200"
