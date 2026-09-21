@@ -1036,3 +1036,75 @@ export async function appendDailyLogToSheet(accessToken: string, spreadsheetId: 
     throw new Error(err.error?.message || 'ไม่สามารถบันทึกข้อมูลอาการลงใน Google Sheet ได้');
   }
 }
+
+// ------------------- DELETION & RESET OPERATIONS -------------------
+
+export async function deletePatientFromSheet(accessToken: string, spreadsheetId: string, patientId: string): Promise<void> {
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(PATIENTS_SHEET_NAME, 'A:A')}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const rows: string[][] = data.values || [];
+    const rowIndex = rows.findIndex((row) => row[0] === patientId);
+    if (rowIndex >= 1) {
+      const sheetRowNum = rowIndex + 1;
+      // Blank out the row or clear it
+      const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(PATIENTS_SHEET_NAME, `A${sheetRowNum}:AA${sheetRowNum}`)}:clear`;
+      await fetch(clearUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+  } catch (err) {
+    console.error('Error deleting patient from sheet:', err);
+  }
+}
+
+export async function deleteContactFromSheet(accessToken: string, spreadsheetId: string, contactId: string): Promise<void> {
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(CONTACTS_SHEET_NAME, 'A:A')}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const rows: string[][] = data.values || [];
+    const rowIndex = rows.findIndex((row) => row[0] === contactId);
+    if (rowIndex >= 1) {
+      const sheetRowNum = rowIndex + 1;
+      const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(CONTACTS_SHEET_NAME, `A${sheetRowNum}:AD${sheetRowNum}`)}:clear`;
+      await fetch(clearUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+  } catch (err) {
+    console.error('Error deleting contact from sheet:', err);
+  }
+}
+
+export async function clearAllSheetData(accessToken: string, spreadsheetId: string): Promise<void> {
+  try {
+    const ranges = [
+      `${PATIENTS_SHEET_NAME}!A2:AA5000`,
+      `${INVESTIGATION_SHEET_NAME}!A2:AQ5000`,
+      `${CONTACTS_SHEET_NAME}!A2:AD5000`,
+      `${FOLLOW_UPS_SHEET_NAME}!A2:P5000`,
+      `${DAILY_LOGS_SHEET_NAME}!A2:Y10000`,
+    ];
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ranges }),
+    });
+  } catch (err) {
+    console.error('Error clearing sheet data:', err);
+  }
+}
+

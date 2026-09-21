@@ -12,6 +12,7 @@ import {
   Trash2, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
   Download, 
   Lock, 
   Unlock,
@@ -49,6 +50,7 @@ interface Props {
   followUps: ContactFollowUp[];
   dailyLogs: DailyLog[];
   onTokenUpdate?: (token: string) => void;
+  onClearAllData?: () => void;
 }
 
 export const BackendAdminModal: React.FC<Props> = ({
@@ -68,9 +70,11 @@ export const BackendAdminModal: React.FC<Props> = ({
   followUps,
   dailyLogs,
   onTokenUpdate,
+  onClearAllData,
 }) => {
   const [activeTab, setActiveTab] = useState<'sheets' | 'staff' | 'permissions' | 'backup'>('sheets');
   const [staffList, setStaffList] = useState<StaffAccount[]>(() => getStoredStaffList());
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   
   // Sheet config state
   const [customSheetId, setCustomSheetId] = useState('');
@@ -806,6 +810,64 @@ export const BackendAdminModal: React.FC<Props> = ({
                   </button>
                 </div>
               </div>
+
+              {onClearAllData && isAdmin && (
+                <div className="bg-rose-50/60 border border-rose-200 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h5 className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                        <span>ล้างข้อมูลผู้ป่วยและกลุ่มเสี่ยงทั้งหมดเพื่อเริ่มกรอกใหม่ (Clear All Data)</span>
+                      </h5>
+                      <p className="text-[11px] text-rose-800/80 mt-1 leading-relaxed">
+                        ลบรายชื่อผู้ป่วย ข้อมูลการสอบสวนโรค ผู้สัมผัสโรค บันทึกการติดตามตรวจ CXR และประวัติการทานยาทั้งหมดออกจากฐานข้อมูล เพื่อให้คุณสามารถเริ่มกรอกข้อมูลจริงได้ใหม่ตั้งแต่ต้น
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setShowClearConfirm(true)}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex-shrink-0 cursor-pointer"
+                    >
+                      ล้างข้อมูลทั้งหมด
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Clear All Confirmation Modal */}
+              {showClearConfirm && (
+                <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+                  <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                    <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <div className="text-center">
+                      <h3 className="text-base font-bold text-slate-900">ยืนยันการล้างข้อมูลทั้งหมดในระบบ</h3>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                        การดำเนินการนี้จะลบรายชื่อผู้ป่วยทั้งหมด ({patients.length} ราย) และกลุ่มเสี่ยงทั้งหมด ({contacts.length} ราย) ออกจากระบบและตาราง Google Sheet เพื่อให้คุณเริ่มต้นกรอกข้อมูลใหม่ได้ทันที
+                      </p>
+                    </div>
+                    <div className="flex justify-center gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowClearConfirm(false)}
+                        className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowClearConfirm(false);
+                          if (onClearAllData) onClearAllData();
+                        }}
+                        className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-xs cursor-pointer"
+                      >
+                        ยืนยันการล้างข้อมูลทั้งหมด
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

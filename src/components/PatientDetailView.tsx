@@ -41,6 +41,7 @@ interface Props {
   onClose: () => void;
   spreadsheetUrl?: string | null;
   currentUserProfile?: UserProfile | null;
+  onDeletePatient?: (patientId: string) => void;
 }
 
 export const PatientDetailView: React.FC<Props> = ({
@@ -56,8 +57,10 @@ export const PatientDetailView: React.FC<Props> = ({
   onClose,
   spreadsheetUrl,
   currentUserProfile,
+  onDeletePatient,
 }) => {
   const [showPdfModal, setShowPdfModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Sort logs descending by date
   const sortedLogs = [...logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -160,6 +163,15 @@ export const PatientDetailView: React.FC<Props> = ({
             <FileText className="w-4 h-4 text-teal-700" />
             {investigation ? 'ดู/แก้ไขใบสอบสวนโรค' : '+ บันทึกใบสอบสวนโรค (DDC)'}
           </button>
+          {onDeletePatient && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="px-3.5 py-2 text-xs font-medium text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition cursor-pointer"
+              title="ลบข้อมูลผู้ป่วยรายนี้"
+            >
+              ลบผู้ป่วย
+            </button>
+          )}
           <button
             onClick={onOpenLogModal}
             className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
@@ -169,6 +181,43 @@ export const PatientDetailView: React.FC<Props> = ({
           </button>
         </div>
       </div>
+
+      {/* Delete Patient Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-base font-bold text-slate-900">ยืนยันการลบข้อมูลผู้ป่วย</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                คุณต้องการลบข้อมูลของ <strong className="text-slate-800">{patient.fullName} (HN: {patient.hn})</strong> ใช่หรือไม่? 
+                ข้อมูลประวัติการสอบสวนโรคและบันทึกอาการจะถูกลบออกจากระบบและ Google Sheet
+              </p>
+            </div>
+            <div className="flex justify-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  if (onDeletePatient) onDeletePatient(patient.id);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-xs"
+              >
+                ยืนยันการลบ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Warning banner if severe symptoms detected recently */}
       {recentRedFlags.length > 0 && (

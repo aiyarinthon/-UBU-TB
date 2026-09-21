@@ -25,7 +25,8 @@ import {
   FileSpreadsheet,
   Printer,
   Download,
-  Send
+  Send,
+  Trash2
 } from 'lucide-react';
 import { ContactPerson, ContactFollowUp, Patient, UserProfile } from '../types';
 import { ContactCriteriaModal } from './ContactCriteriaModal';
@@ -41,6 +42,7 @@ interface Props {
   onOpenNewContact: (patient?: Patient, defaultType?: 'household' | 'non_household') => void;
   onEditContact: (contact: ContactPerson) => void;
   onOpenFollowUpModal: (contact: ContactPerson, defaultStep?: ContactFollowUp['stepType']) => void;
+  onDeleteContact?: (contactId: string) => void;
   spreadsheetUrl?: string | null;
 }
 
@@ -52,6 +54,7 @@ export const ContactsView: React.FC<Props> = ({
   onOpenNewContact,
   onEditContact,
   onOpenFollowUpModal,
+  onDeleteContact,
   spreadsheetUrl,
 }) => {
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
@@ -63,6 +66,7 @@ export const ContactsView: React.FC<Props> = ({
   const [selectedContactForHistory, setSelectedContactForHistory] = useState<ContactPerson | null>(null);
   const [emailModalContact, setEmailModalContact] = useState<ContactPerson | null>(null);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [contactToDelete, setContactToDelete] = useState<ContactPerson | null>(null);
 
   // Helper for formatting date
   const formatDateTime = (isoString?: string) => {
@@ -498,6 +502,15 @@ export const ContactsView: React.FC<Props> = ({
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
+                          {onDeleteContact && (
+                            <button
+                              onClick={() => setContactToDelete(contact)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="ลบรายชื่อผู้สัมผัส"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <button
                             onClick={() => setSelectedContactForHistory(contact)}
                             className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition cursor-pointer"
@@ -567,6 +580,15 @@ export const ContactsView: React.FC<Props> = ({
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
+                    {onDeleteContact && (
+                      <button
+                        onClick={() => setContactToDelete(contact)}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                        title="ลบรายชื่อผู้สัมผัส"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -890,6 +912,44 @@ export const ContactsView: React.FC<Props> = ({
         followUps={followUps}
         currentUser={currentUserProfile?.name || 'เจ้าหน้าที่เวชกรรมสังคม'}
       />
+
+      {/* Delete Contact Confirmation Modal */}
+      {contactToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-base font-bold text-slate-900">ยืนยันการลบข้อมูลผู้สัมผัสโรค</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                คุณต้องการลบข้อมูลของ <strong className="text-slate-800">{contactToDelete.fullName} (HN: {contactToDelete.hn || '-'})</strong> ใช่หรือไม่? 
+                ประวัติการตรวจติดตาม CXR/IGRA จะถูกลบออกจากระบบและ Google Sheet
+              </p>
+            </div>
+            <div className="flex justify-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setContactToDelete(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = contactToDelete.id;
+                  setContactToDelete(null);
+                  if (onDeleteContact) onDeleteContact(id);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-xs cursor-pointer"
+              >
+                ยืนยันการลบ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

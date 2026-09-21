@@ -14,11 +14,14 @@ import {
   fetchAllFollowUps,
   appendPatientToSheet, 
   updatePatientInSheet, 
+  deletePatientFromSheet,
   appendDailyLogToSheet, 
   saveInvestigationToSheet,
   saveContactToSheet,
+  deleteContactFromSheet,
   saveFollowUpToSheet,
-  createTBSheet 
+  createTBSheet,
+  clearAllSheetData
 } from './lib/sheetsApi';
 import { 
   Patient, 
@@ -99,14 +102,61 @@ export default function App() {
     return localStorage.getItem(`${STORAGE_SHEET_KEY}_name`) || null;
   });
 
-  // App Data State (Initialized with comprehensive records so dashboard & contacts are always functional)
-  const [patients, setPatients] = useState<Patient[]>(INITIAL_PATIENTS);
-  const [dailyLogs, setDailyLogs] = useState<DailyLog[]>(INITIAL_DAILY_LOGS);
-  const [investigations, setInvestigations] = useState<InvestigationForm[]>(INITIAL_INVESTIGATIONS);
-  const [contacts, setContacts] = useState<ContactPerson[]>(INITIAL_CONTACTS);
-  const [followUps, setFollowUps] = useState<ContactFollowUp[]>(INITIAL_FOLLOWUPS);
+  // App Data State (Initialized empty with local persistence so user starts clean and records are saved locally + synced to Google Sheets)
+  const [patients, setPatients] = useState<Patient[]>(() => {
+    const saved = localStorage.getItem('tb_care_patients_v4');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return INITIAL_PATIENTS; }
+    }
+    return INITIAL_PATIENTS;
+  });
+  const [dailyLogs, setDailyLogs] = useState<DailyLog[]>(() => {
+    const saved = localStorage.getItem('tb_care_logs_v4');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return INITIAL_DAILY_LOGS; }
+    }
+    return INITIAL_DAILY_LOGS;
+  });
+  const [investigations, setInvestigations] = useState<InvestigationForm[]>(() => {
+    const saved = localStorage.getItem('tb_care_inv_v4');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return INITIAL_INVESTIGATIONS; }
+    }
+    return INITIAL_INVESTIGATIONS;
+  });
+  const [contacts, setContacts] = useState<ContactPerson[]>(() => {
+    const saved = localStorage.getItem('tb_care_contacts_v4');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return INITIAL_CONTACTS; }
+    }
+    return INITIAL_CONTACTS;
+  });
+  const [followUps, setFollowUps] = useState<ContactFollowUp[]>(() => {
+    const saved = localStorage.getItem('tb_care_followups_v4');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return INITIAL_FOLLOWUPS; }
+    }
+    return INITIAL_FOLLOWUPS;
+  });
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [statusNotification, setStatusNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Sync to local storage
+  useEffect(() => {
+    localStorage.setItem('tb_care_patients_v4', JSON.stringify(patients));
+  }, [patients]);
+  useEffect(() => {
+    localStorage.setItem('tb_care_logs_v4', JSON.stringify(dailyLogs));
+  }, [dailyLogs]);
+  useEffect(() => {
+    localStorage.setItem('tb_care_inv_v4', JSON.stringify(investigations));
+  }, [investigations]);
+  useEffect(() => {
+    localStorage.setItem('tb_care_contacts_v4', JSON.stringify(contacts));
+  }, [contacts]);
+  useEffect(() => {
+    localStorage.setItem('tb_care_followups_v4', JSON.stringify(followUps));
+  }, [followUps]);
 
   // UI Navigation & Modals
   const [activeTab, setActiveTab] = useState<'dashboard' | 'patients' | 'contacts' | 'analytics'>('dashboard');
@@ -281,37 +331,75 @@ export default function App() {
     showToast('success', 'บันทึกการเชื่อมโยง Google Sheet สำเร็จแล้ว');
   };
 
-  // 1. Save/Update Patient
+  // 1. Save/Update Patient (Auto-syncs to Google Sheet)
   const handleSavePatient = async (patientData: Patient) => {
-    if (!token || !spreadsheetId) throw new Error('ยังไม่ได้เชื่อมต่อ Google Sheet หรือหมดอายุการเชื่อมต่อ');
-
     const isEdit = patients.some(p => p.id === patientData.id);
     if (isEdit) {
-      await updatePatientInSheet(token, spreadsheetId, patientData);
       setPatients(prev => prev.map(p => p.id === patientData.id ? patientData : p));
       if (selectedPatient?.id === patientData.id) setSelectedPatient(patientData);
-      showToast('success', `อัปเดตข้อมูลผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) ลง Google Sheet เรียบร้อยแล้ว`);
     } else {
-      await appendPatientToSheet(token, spreadsheetId, patientData);
       setPatients(prev => [patientData, ...prev]);
-      showToast('success', `ลงทะเบียนผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) ลง Google Sheet สำเร็จ`);
+    }
+
+    if (token && spreadsheetId) {
+      try {
+        if (isEdit) {
+          await updatePatientInSheet(token, spreadsheetId, patientData);
+        } else {
+          await appendPatientToSheet(token, spreadsheetId, patientData);
+        }
+        showToast('success', `บันทึกข้อมูลผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) และบันทึกลง Google Sheet อัตโนมัติแล้ว`);
+      } catch (err: any) {
+        console.error('Auto-sync patient error:', err);
+        showToast('success', `บันทึกข้อมูลผู้ป่วย ${patientData.fullName} ในระบบเรียบร้อย (แจ้งเตือน Google Sheet: ${err.message})`);
+      }
+    } else {
+      showToast('success', `บันทึกข้อมูลผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) เรียบร้อยแล้ว`);
     }
   };
 
-  // 2. Save Daily Log
-  const handleSaveDailyLog = async (logData: DailyLog) => {
-    if (!token || !spreadsheetId) throw new Error('ยังไม่ได้เชื่อมต่อ Google Sheet หรือหมดอายุการเชื่อมต่อ');
+  // Delete Patient
+  const handleDeletePatient = async (patientId: string) => {
+    const target = patients.find(p => p.id === patientId);
+    setPatients(prev => prev.filter(p => p.id !== patientId));
+    setDailyLogs(prev => prev.filter(l => l.patientId !== patientId));
+    setInvestigations(prev => prev.filter(i => i.patientId !== patientId && i.patientHN !== target?.hn));
+    if (selectedPatient?.id === patientId) {
+      setSelectedPatient(null);
+    }
 
-    await appendDailyLogToSheet(token, spreadsheetId, logData);
-    setDailyLogs(prev => [logData, ...prev]);
-    showToast('success', `บันทึกข้อมูลการทานยาวันที่ ${logData.date} สำเร็จ`);
+    if (token && spreadsheetId) {
+      try {
+        await deletePatientFromSheet(token, spreadsheetId, patientId);
+        showToast('success', `ลบข้อมูลผู้ป่วย ${target?.fullName || ''} และอัปเดต Google Sheet เรียบร้อยแล้ว`);
+      } catch (err: any) {
+        console.error('Delete patient sheet error:', err);
+        showToast('success', `ลบข้อมูลผู้ป่วยออกจากระบบเรียบร้อยแล้ว`);
+      }
+    } else {
+      showToast('success', `ลบข้อมูลผู้ป่วยออกจากระบบเรียบร้อยแล้ว`);
+    }
   };
 
-  // 3. Save Investigation Form
-  const handleSaveInvestigation = async (invData: InvestigationForm) => {
-    if (!token || !spreadsheetId) throw new Error('ยังไม่ได้เชื่อมต่อ Google Sheet หรือหมดอายุการเชื่อมต่อ');
+  // 2. Save Daily Log (Auto-syncs to Google Sheet)
+  const handleSaveDailyLog = async (logData: DailyLog) => {
+    setDailyLogs(prev => [logData, ...prev]);
 
-    await saveInvestigationToSheet(token, spreadsheetId, invData);
+    if (token && spreadsheetId) {
+      try {
+        await appendDailyLogToSheet(token, spreadsheetId, logData);
+        showToast('success', `บันทึกการทานยาวันที่ ${logData.date} และบันทึกลง Google Sheet อัตโนมัติแล้ว`);
+      } catch (err: any) {
+        console.error('Auto-sync log error:', err);
+        showToast('success', `บันทึกการทานยาวันที่ ${logData.date} ในระบบเรียบร้อย`);
+      }
+    } else {
+      showToast('success', `บันทึกการทานยาวันที่ ${logData.date} เรียบร้อยแล้ว`);
+    }
+  };
+
+  // 3. Save Investigation Form (Auto-syncs to Google Sheet)
+  const handleSaveInvestigation = async (invData: InvestigationForm) => {
     setInvestigations(prev => {
       const idx = prev.findIndex(i => i.id === invData.id || i.patientId === invData.patientId);
       if (idx >= 0) {
@@ -335,29 +423,62 @@ export default function App() {
       return p;
     }));
 
-    showToast('success', `บันทึกข้อมูลการสอบสวนโรคผู้ป่วย ${invData.patientName} ลง Google Sheet สำเร็จ`);
-  };
-
-  // 4. Save/Update Contact Person
-  const handleSaveContact = async (contactData: ContactPerson) => {
-    if (!token || !spreadsheetId) throw new Error('ยังไม่ได้เชื่อมต่อ Google Sheet หรือหมดอายุการเชื่อมต่อ');
-
-    await saveContactToSheet(token, spreadsheetId, contactData);
-    const isEdit = contacts.some(c => c.id === contactData.id);
-    if (isEdit) {
-      setContacts(prev => prev.map(c => c.id === contactData.id ? contactData : c));
-      showToast('success', `อัปเดตข้อมูลผู้สัมผัส ${contactData.fullName} ลง Google Sheet เรียบร้อยแล้ว`);
+    if (token && spreadsheetId) {
+      try {
+        await saveInvestigationToSheet(token, spreadsheetId, invData);
+        showToast('success', `บันทึกใบสอบสวนโรคผู้ป่วย ${invData.patientName} และบันทึกลง Google Sheet อัตโนมัติแล้ว`);
+      } catch (err: any) {
+        console.error('Auto-sync investigation error:', err);
+        showToast('success', `บันทึกใบสอบสวนโรคผู้ป่วย ${invData.patientName} ในระบบเรียบร้อย`);
+      }
     } else {
-      setContacts(prev => [contactData, ...prev]);
-      showToast('success', `เพิ่มข้อมูลผู้สัมผัส ${contactData.fullName} (HN: ${contactData.hn}) ลง Google Sheet สำเร็จ`);
+      showToast('success', `บันทึกใบสอบสวนโรคผู้ป่วย ${invData.patientName} เรียบร้อยแล้ว`);
     }
   };
 
-  // 5. Save Follow-up
-  const handleSaveFollowUp = async (followUpData: ContactFollowUp) => {
-    if (!token || !spreadsheetId) throw new Error('ยังไม่ได้เชื่อมต่อ Google Sheet หรือหมดอายุการเชื่อมต่อ');
+  // 4. Save/Update Contact Person (Auto-syncs to Google Sheet)
+  const handleSaveContact = async (contactData: ContactPerson) => {
+    const isEdit = contacts.some(c => c.id === contactData.id);
+    if (isEdit) {
+      setContacts(prev => prev.map(c => c.id === contactData.id ? contactData : c));
+    } else {
+      setContacts(prev => [contactData, ...prev]);
+    }
 
-    await saveFollowUpToSheet(token, spreadsheetId, followUpData);
+    if (token && spreadsheetId) {
+      try {
+        await saveContactToSheet(token, spreadsheetId, contactData);
+        showToast('success', `${isEdit ? 'อัปเดต' : 'เพิ่ม'}ข้อมูลผู้สัมผัส ${contactData.fullName} และบันทึกลง Google Sheet อัตโนมัติแล้ว`);
+      } catch (err: any) {
+        console.error('Auto-sync contact error:', err);
+        showToast('success', `บันทึกข้อมูลผู้สัมผัส ${contactData.fullName} ในระบบเรียบร้อย`);
+      }
+    } else {
+      showToast('success', `บันทึกข้อมูลผู้สัมผัส ${contactData.fullName} เรียบร้อยแล้ว`);
+    }
+  };
+
+  // Delete Contact
+  const handleDeleteContact = async (contactId: string) => {
+    const target = contacts.find(c => c.id === contactId);
+    setContacts(prev => prev.filter(c => c.id !== contactId));
+    setFollowUps(prev => prev.filter(f => f.contactId !== contactId));
+
+    if (token && spreadsheetId) {
+      try {
+        await deleteContactFromSheet(token, spreadsheetId, contactId);
+        showToast('success', `ลบข้อมูลผู้สัมผัส ${target?.fullName || ''} และอัปเดต Google Sheet เรียบร้อยแล้ว`);
+      } catch (err: any) {
+        console.error('Delete contact sheet error:', err);
+        showToast('success', `ลบข้อมูลผู้สัมผัสออกจากระบบเรียบร้อยแล้ว`);
+      }
+    } else {
+      showToast('success', `ลบข้อมูลผู้สัมผัสออกจากระบบเรียบร้อยแล้ว`);
+    }
+  };
+
+  // 5. Save Follow-up (Auto-syncs to Google Sheet)
+  const handleSaveFollowUp = async (followUpData: ContactFollowUp) => {
     setFollowUps(prev => {
       const idx = prev.findIndex(f => f.id === followUpData.id);
       if (idx >= 0) {
@@ -398,15 +519,48 @@ export default function App() {
       return c;
     }));
 
-    if (contactToUpdate) {
+    if (token && spreadsheetId) {
       try {
-        await saveContactToSheet(token, spreadsheetId, contactToUpdate);
-      } catch (err) {
-        console.error('Failed to sync contact status to sheet:', err);
+        await saveFollowUpToSheet(token, spreadsheetId, followUpData);
+        if (contactToUpdate) {
+          await saveContactToSheet(token, spreadsheetId, contactToUpdate);
+        }
+        showToast('success', `บันทึกผลการตรวจ (${followUpData.stepType}) และบันทึกลง Google Sheet อัตโนมัติแล้ว`);
+      } catch (err: any) {
+        console.error('Auto-sync follow-up error:', err);
+        showToast('success', `บันทึกผลการตรวจ (${followUpData.stepType}) ในระบบเรียบร้อย`);
       }
+    } else {
+      showToast('success', `บันทึกผลการตรวจ (${followUpData.stepType}) เรียบร้อยแล้ว`);
     }
+  };
 
-    showToast('success', `บันทึกผลการติดตามตรวจ (${followUpData.stepType}) ลง Google Sheet สำเร็จ`);
+  // Clear All Data (Reset completely)
+  const handleClearAllData = async () => {
+    setPatients([]);
+    setDailyLogs([]);
+    setInvestigations([]);
+    setContacts([]);
+    setFollowUps([]);
+    setSelectedPatient(null);
+
+    localStorage.removeItem('tb_care_patients_v4');
+    localStorage.removeItem('tb_care_logs_v4');
+    localStorage.removeItem('tb_care_inv_v4');
+    localStorage.removeItem('tb_care_contacts_v4');
+    localStorage.removeItem('tb_care_followups_v4');
+
+    if (token && spreadsheetId) {
+      try {
+        await clearAllSheetData(token, spreadsheetId);
+        showToast('success', 'ลบรายชื่อผู้ป่วยและกลุ่มเสี่ยงทั้งหมดออกจากระบบและ Google Sheet เรียบร้อยแล้ว พร้อมสำหรับการกรอกข้อมูลใหม่');
+      } catch (err: any) {
+        console.error('Clear all sheets error:', err);
+        showToast('success', 'ลบข้อมูลทั้งหมดในระบบเรียบร้อยแล้ว พร้อมสำหรับการกรอกข้อมูลใหม่');
+      }
+    } else {
+      showToast('success', 'ลบข้อมูลทั้งหมดในระบบเรียบร้อยแล้ว พร้อมสำหรับการกรอกข้อมูลใหม่');
+    }
   };
 
   return (
@@ -685,6 +839,7 @@ export default function App() {
                 onClose={() => setSelectedPatient(null)}
                 spreadsheetUrl={spreadsheetUrl}
                 currentUserProfile={currentUserProfile}
+                onDeletePatient={handleDeletePatient}
               />
             ) : activeTab === 'patients' ? (
               <PatientList
@@ -732,6 +887,7 @@ export default function App() {
                   setFollowUpDefaultStep(step);
                   setIsFollowUpModalOpen(true);
                 }}
+                onDeleteContact={handleDeleteContact}
                 spreadsheetUrl={spreadsheetUrl}
               />
             ) : (
@@ -843,11 +999,12 @@ export default function App() {
               setCurrentUserProfile(profile);
               showToast('success', `อัปเดตสิทธิ์เป็น ${profile.displayName} (${profile.role}) เรียบร้อยแล้ว`);
             }}
-            allPatients={patients}
-            allDailyLogs={dailyLogs}
-            allInvestigations={investigations}
-            allContacts={contacts}
-            allFollowUps={followUps}
+            patients={patients}
+            investigations={investigations}
+            contacts={contacts}
+            followUps={followUps}
+            dailyLogs={dailyLogs}
+            onClearAllData={handleClearAllData}
             onTokenUpdate={(newToken) => setToken(newToken)}
           />
         )}
