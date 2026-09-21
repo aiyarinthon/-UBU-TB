@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { Patient, DailyLog, ContactPerson, ContactFollowUp, UserProfile } from '../types';
 import { ExecutiveKpiReportModal } from './ExecutiveKpiReportModal';
+import { GettingStartedGuide } from './GettingStartedGuide';
 
 interface Props {
   patients: Patient[];
@@ -44,6 +45,9 @@ interface Props {
   contacts?: ContactPerson[];
   followUps?: ContactFollowUp[];
   currentUserProfile?: UserProfile | null;
+  spreadsheetId?: string | null;
+  spreadsheetUrl?: string | null;
+  hasAccessToken?: boolean;
   onNavigateTab?: (tab: 'patients' | 'contacts') => void;
 }
 
@@ -53,6 +57,9 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   contacts = [], 
   followUps = [],
   currentUserProfile,
+  spreadsheetId,
+  spreadsheetUrl,
+  hasAccessToken,
   onNavigateTab 
 }) => {
   // Date Filtering State
@@ -248,6 +255,12 @@ export const AnalyticsDashboard: React.FC<Props> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
+      {/* 0. Getting Started & Setup Guide */}
+      <GettingStartedGuide
+        spreadsheetId={spreadsheetId}
+        spreadsheetUrl={spreadsheetUrl}
+        hasAccessToken={hasAccessToken}
+      />
       
       {/* 1. Date Filter & Executive Action Toolbar */}
       <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">

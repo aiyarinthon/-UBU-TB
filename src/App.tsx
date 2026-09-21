@@ -935,6 +935,9 @@ export default function App() {
                 contacts={contacts}
                 followUps={followUps}
                 currentUserProfile={currentUserProfile}
+                spreadsheetId={spreadsheetId}
+                spreadsheetUrl={spreadsheetUrl}
+                hasAccessToken={!!token}
                 onNavigateTab={(tab) => {
                   setActiveTab(tab);
                   setSelectedPatient(null);
