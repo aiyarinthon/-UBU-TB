@@ -276,7 +276,30 @@ export default function App() {
 
   // Load Data from Google Sheet across all 5 tabs
   const loadSheetData = useCallback(async () => {
-    if (!token || !spreadsheetId) return;
+    if (!spreadsheetId) {
+      showToast('error', 'ยังไม่ได้เชื่อมโยง Google Sheet กรุณาเชื่อมโยงชีทก่อนซิงค์ข้อมูล');
+      return;
+    }
+
+    let activeToken = token;
+    if (!activeToken) {
+      try {
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (authErr: any) {
+        showToast('error', 'จำเป็นต้องให้สิทธิ์ Google OAuth เพื่อซิงค์ข้อมูลจาก Google Sheet (กรุณากด "เชื่อมต่อสิทธิ์ Google")');
+        return;
+      }
+    }
+
+    if (!activeToken) {
+      showToast('error', 'ไม่พบสิทธิ์ Google OAuth กรุณากด "เชื่อมต่อสิทธิ์ Google เพื่อบันทึก" ด้านบน');
+      return;
+    }
+
     setIsDataLoading(true);
     try {
       const [
@@ -286,23 +309,28 @@ export default function App() {
         fetchedContacts, 
         fetchedFollowUps
       ] = await Promise.all([
-        fetchAllPatients(token, spreadsheetId),
-        fetchAllDailyLogs(token, spreadsheetId),
-        fetchAllInvestigations(token, spreadsheetId),
-        fetchAllContacts(token, spreadsheetId),
-        fetchAllFollowUps(token, spreadsheetId),
+        fetchAllPatients(activeToken, spreadsheetId),
+        fetchAllDailyLogs(activeToken, spreadsheetId),
+        fetchAllInvestigations(activeToken, spreadsheetId),
+        fetchAllContacts(activeToken, spreadsheetId),
+        fetchAllFollowUps(activeToken, spreadsheetId),
       ]);
 
-      setPatients(fetchedPatients);
-      setDailyLogs(fetchedLogs);
-      setInvestigations(fetchedInvestigations);
-      setContacts(fetchedContacts);
-      setFollowUps(fetchedFollowUps);
-      
-      // Update selected patient if currently viewing
-      if (selectedPatient) {
-        const updated = fetchedPatients.find(p => p.id === selectedPatient.id);
-        if (updated) setSelectedPatient(updated);
+      if (fetchedPatients.length > 0 || fetchedContacts.length > 0 || fetchedLogs.length > 0) {
+        setPatients(fetchedPatients);
+        setDailyLogs(fetchedLogs);
+        setInvestigations(fetchedInvestigations);
+        setContacts(fetchedContacts);
+        setFollowUps(fetchedFollowUps);
+        
+        // Update selected patient if currently viewing
+        if (selectedPatient) {
+          const updated = fetchedPatients.find(p => p.id === selectedPatient.id);
+          if (updated) setSelectedPatient(updated);
+        }
+        showToast('success', `ซิงค์ข้อมูลจาก Google Sheet สำเร็จ (${fetchedPatients.length} ผู้ป่วย, ${fetchedContacts.length} ผู้สัมผัส, ${fetchedLogs.length} บันทึกยา)`);
+      } else {
+        showToast('success', 'เชื่อมต่อ Google Sheet สำเร็จ (ยังไม่มีข้อมูลในชีท หรือเป็นชีทใหม่)');
       }
     } catch (err: any) {
       console.error('Error fetching sheet data:', err);

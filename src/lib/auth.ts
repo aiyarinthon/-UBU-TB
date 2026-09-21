@@ -60,6 +60,13 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
+    if (
+      error.code === 'auth/popup-blocked' || 
+      error.message?.includes('popup') ||
+      error.code === 'auth/cancelled-popup-request'
+    ) {
+      throw new Error('POPUP_BLOCKED: เบราว์เซอร์บล็อกหน้าต่าง Pop-up เนื่องจากกำลังทำงานในโหมดพรีวิว (iFrame) กรุณากดปุ่ม "เปิดในแท็บใหม่" ด้านล่าง');
+    }
     throw error;
   } finally {
     isSigningIn = false;
