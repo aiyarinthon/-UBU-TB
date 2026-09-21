@@ -71,15 +71,6 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
       d.setDate(d.getDate() - 30);
       startDate = d.toISOString().split('T')[0];
       endDate = now.toISOString().split('T')[0];
-    } else if (dateFilterMode === 'thisMonth') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      endDate = now.toISOString().split('T')[0];
-    } else if (dateFilterMode === 'fy2568') {
-      startDate = '2024-10-01';
-      endDate = '2025-09-30';
-    } else if (dateFilterMode === 'fy2569') {
-      startDate = '2025-10-01';
-      endDate = '2026-09-30';
     }
 
     if (!startDate && !endDate) return items;
@@ -160,9 +151,6 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
       case 'today': return 'ข้อมูลประจำวันนี้';
       case 'last7': return 'ย้อนหลัง 7 วัน';
       case 'last30': return 'ย้อนหลัง 30 วัน';
-      case 'thisMonth': return 'ประจำเดือนปัจจุบัน';
-      case 'fy2568': return 'ปีงบประมาณ 2568 (1 ต.ค. 67 - 30 ก.ย. 68)';
-      case 'fy2569': return 'ปีงบประมาณ 2569 (1 ต.ค. 68 - 30 ก.ย. 69)';
       case 'custom': return `ช่วงวันที่ ${customStart || '-'} ถึง ${customEnd || '-'}`;
       default: return 'ข้อมูลสะสมทั้งหมด (Cumulative All-Time)';
     }
@@ -254,11 +242,9 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
             <div className="inline-flex rounded-xl bg-white p-1 border border-slate-200 shadow-2xs">
               {[
                 { key: 'all', label: 'ทั้งหมด' },
+                { key: 'today', label: 'วันนี้' },
                 { key: 'last7', label: '7 วัน' },
                 { key: 'last30', label: '30 วัน' },
-                { key: 'thisMonth', label: 'เดือนนี้' },
-                { key: 'fy2568', label: 'ปีงบ 68' },
-                { key: 'fy2569', label: 'ปีงบ 69' },
                 { key: 'custom', label: 'กำหนดเอง' },
               ].map(opt => (
                 <button

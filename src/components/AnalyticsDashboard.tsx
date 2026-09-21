@@ -83,15 +83,6 @@ export const AnalyticsDashboard: React.FC<Props> = ({
       d.setDate(d.getDate() - 30);
       startDate = d.toISOString().split('T')[0];
       endDate = now.toISOString().split('T')[0];
-    } else if (dateFilterMode === 'thisMonth') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      endDate = now.toISOString().split('T')[0];
-    } else if (dateFilterMode === 'fy2568') {
-      startDate = '2024-10-01';
-      endDate = '2025-09-30';
-    } else if (dateFilterMode === 'fy2569') {
-      startDate = '2025-10-01';
-      endDate = '2026-09-30';
     }
 
     if (!startDate && !endDate) return items;
@@ -226,9 +217,6 @@ export const AnalyticsDashboard: React.FC<Props> = ({
       case 'today': return 'ข้อมูลวันนี้';
       case 'last7': return '7 วันล่าสุด';
       case 'last30': return '30 วันล่าสุด';
-      case 'thisMonth': return 'เดือนปัจจุบัน';
-      case 'fy2568': return 'ปีงบประมาณ 2568';
-      case 'fy2569': return 'ปีงบประมาณ 2569';
       case 'custom': return `${customStartDate || '-'} ถึง ${customEndDate || '-'}`;
       default: return 'ข้อมูลสะสมทั้งหมด';
     }
@@ -277,9 +265,6 @@ export const AnalyticsDashboard: React.FC<Props> = ({
               { key: 'today', label: 'วันนี้' },
               { key: 'last7', label: '7 วันล่าสุด' },
               { key: 'last30', label: '30 วันล่าสุด' },
-              { key: 'thisMonth', label: 'เดือนนี้' },
-              { key: 'fy2568', label: 'ปีงบ 68' },
-              { key: 'fy2569', label: 'ปีงบ 69' },
               { key: 'custom', label: 'กำหนดเอง' },
             ].map(opt => (
               <button
