@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Patient, DailyLog, InvestigationForm, ContactPerson, UserProfile } from '../types';
 import { PatientReportPdfModal } from './PatientReportPdfModal';
+import { formatThaiDate } from '../lib/dateUtils';
 
 interface Props {
   patient: Patient;
@@ -81,9 +82,18 @@ export const PatientDetailView: React.FC<Props> = ({
   }
 
   // Filter contacts belonging to this patient
-  const patientContacts = contacts.filter(c => c.indexPatientId === patient.id || c.indexPatientHN === patient.hn);
+  const patientContacts = contacts.filter(c => c.indexPatientId === patient.id || (c.indexPatientHN && patient.hn && c.indexPatientHN.toLowerCase() === patient.hn.toLowerCase()));
   const householdContacts = patientContacts.filter(c => c.contactType === 'household');
   const nonHouseholdContacts = patientContacts.filter(c => c.contactType === 'non_household');
+
+  // Exact investigated contact numbers (prioritize investigation form, then registered contacts, then patient field)
+  const investigatedHouseholdCount = investigation 
+    ? (investigation.householdContactsCount ?? householdContacts.length) 
+    : (patient.householdContactsCount !== undefined && patient.householdContactsCount > 0 ? patient.householdContactsCount : householdContacts.length);
+
+  const investigatedNonHouseholdCount = investigation 
+    ? (investigation.nonHouseholdContactsCount ?? nonHouseholdContacts.length) 
+    : (patient.nonHouseholdContactsCount !== undefined && patient.nonHouseholdContactsCount > 0 ? patient.nonHouseholdContactsCount : nonHouseholdContacts.length);
 
   // Symptom counts
   const recentRedFlags = sortedLogs.slice(0, 7).filter(l => l.severityLevel === 'severe' || l.symptoms.yellowSkinEyes || l.symptoms.visionChanges || l.symptoms.coughBlood);
@@ -273,7 +283,7 @@ export const PatientDetailView: React.FC<Props> = ({
             <Calendar className="w-3.5 h-3.5 text-slate-500" /> วันที่เริ่มรักษา
           </div>
           <div className="text-sm font-bold text-slate-800">
-            {patient.diagnosisDate ? new Date(patient.diagnosisDate).toLocaleDateString('th-TH') : '-'}
+            {formatThaiDate(patient.diagnosisDate)}
           </div>
           <div className="text-[11px] text-slate-500 mt-1 truncate">
             {patient.hospitalName || 'สถานพยาบาลหลัก'}
@@ -382,7 +392,7 @@ export const PatientDetailView: React.FC<Props> = ({
                 {householdContacts.length} <span className="text-xs font-normal text-emerald-700">คน</span>
               </div>
               <div className="text-[10px] text-emerald-600 mt-0.5">
-                (ระบุจากการสอบสวน: {patient.householdContactsCount || 0} คน)
+                (ระบุจากการสอบสวน: {investigatedHouseholdCount} คน)
               </div>
             </div>
 
@@ -394,7 +404,7 @@ export const PatientDetailView: React.FC<Props> = ({
                 {nonHouseholdContacts.length} <span className="text-xs font-normal text-blue-700">คน</span>
               </div>
               <div className="text-[10px] text-blue-600 mt-0.5">
-                (ระบุจากการสอบสวน: {patient.nonHouseholdContactsCount || 0} คน)
+                (ระบุจากการสอบสวน: {investigatedNonHouseholdCount} คน)
               </div>
             </div>
           </div>
@@ -529,12 +539,7 @@ export const PatientDetailView: React.FC<Props> = ({
                   return (
                     <tr key={log.id} className="hover:bg-slate-50/80 transition">
                       <td className="py-3 px-4 font-semibold text-slate-800 whitespace-nowrap">
-                        {new Date(log.date).toLocaleDateString('th-TH', {
-                          weekday: 'short',
-                          day: 'numeric',
-                          month: 'short',
-                          year: '2-digit'
-                        })}
+                        {formatThaiDate(log.date)}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
                         {log.takenMedication ? (

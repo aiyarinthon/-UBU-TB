@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Patient, ContactPerson, ContactFollowUp, DailyLog, InvestigationForm } from '../types';
+import { formatThaiDate } from './dateUtils';
 
 /**
  * Helper to trigger browser download of a Blob
@@ -16,21 +17,10 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 /**
- * Format date for display
+ * Format date for display in Thai Buddhist Era (พ.ศ.)
  */
 const formatDate = (dateStr?: string) => {
-  if (!dateStr) return '-';
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('th-TH', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return dateStr;
-  }
+  return formatThaiDate(dateStr, { short: true });
 };
 
 /**
@@ -101,6 +91,10 @@ export function exportContactsToExcel(contacts: ContactPerson[], followUps: Cont
       'HN ผู้ป่วยดัชนี': c.indexPatientHN,
       'สถานะคีย์ N-tip': c.ntipStatus === 'entered' ? 'คีย์แล้ว' : 'ยังไม่ได้คีย์',
       'รหัสที่คีย์ใน n-tip': c.ntipKeyCode || '-',
+      'รหัส NTIP ครั้งที่ 1 (0M)': c.ntipCodeRound1 || '-',
+      'รหัส NTIP ครั้งที่ 2 (6M)': c.ntipCodeRound2 || '-',
+      'รหัส NTIP ครั้งที่ 3 (12M)': c.ntipCodeRound3 || '-',
+      'รหัส NTIP ครั้งที่ 4 (18M)': c.ntipCodeRound4 || '-',
       'หมายเหตุ N-tip': c.ntipNotes || '-',
       'ผล CXR ล่าสุด': c.cxrResult === 'normal' ? 'ปกติ (Normal)' :
                        c.cxrResult === 'abnormal_suspect_tb' ? 'ผิดปกติ สงสัยวัณโรค' :
@@ -157,7 +151,7 @@ export function exportAllDataToExcel(
     'ประเภทผู้ป่วย': p.treatmentCategory,
     'การวินิจฉัย': p.tbClassification,
     'สูตรยา': p.treatmentRegimen,
-    'วันที่เริ่มรักษา': p.diagnosisDate,
+    'วันที่เริ่มรักษา': formatDate(p.diagnosisDate),
     'รหัส n-tip': p.ntipRegistrationDate,
     'แก้ไขโดย': p.lastUpdatedBy,
   }));
@@ -177,11 +171,15 @@ export function exportAllDataToExcel(
     'ผู้ป่วยดัชนี': c.indexPatientName,
     'HN ดัชนี': c.indexPatientHN,
     'รหัส NTIP': c.ntipKeyCode,
+    'รหัส NTIP ครั้งที่ 1 (0M)': c.ntipCodeRound1 || '-',
+    'รหัส NTIP ครั้งที่ 2 (6M)': c.ntipCodeRound2 || '-',
+    'รหัส NTIP ครั้งที่ 3 (12M)': c.ntipCodeRound3 || '-',
+    'รหัส NTIP ครั้งที่ 4 (18M)': c.ntipCodeRound4 || '-',
     'หมายเหตุ NTIP': c.ntipNotes,
     'ผล CXR ล่าสุด': c.cxrResult,
-    'วันที่ CXR': c.cxrDate,
+    'วันที่ CXR': formatDate(c.cxrDate),
     'รายละเอียดผล': c.cxrResultDetail,
-    'วันนัดถัดไป': c.nextCxrDate,
+    'วันนัดถัดไป': formatDate(c.nextCxrDate),
     'สถานพยาบาล': c.cxrHospital,
     'แก้ไขโดย': c.lastUpdatedBy,
   }));
@@ -195,15 +193,19 @@ export function exportAllDataToExcel(
     'HN ผู้สัมผัส': f.contactHN,
     'HN ผู้ป่วยดัชนี': f.indexPatientHN,
     'รอบ/ขั้นตอน': f.stepType,
-    'วันที่นัด': f.scheduledDate,
-    'วันที่ตรวจจริง': f.actualDate,
+    'วันที่นัด': formatDate(f.scheduledDate),
+    'วันที่ตรวจจริง': formatDate(f.actualDate),
     'สถานะ': f.status,
     'ผลตรวจ': f.testResult,
     'รายละเอียด': f.resultDetail,
     'สูตร TPT': f.tptRegimen,
     'รหัส NTIP': f.ntipKeyCode,
+    'รหัส NTIP ครั้งที่ 1': f.ntipCodeRound1 || '-',
+    'รหัส NTIP ครั้งที่ 2': f.ntipCodeRound2 || '-',
+    'รหัส NTIP ครั้งที่ 3': f.ntipCodeRound3 || '-',
+    'รหัส NTIP ครั้งที่ 4': f.ntipCodeRound4 || '-',
     'หมายเหตุ NTIP': f.ntipNotes,
-    'นัดครั้งถัดไป': f.nextAppointmentDate,
+    'นัดครั้งถัดไป': formatDate(f.nextAppointmentDate),
     'สถานพยาบาล': f.hospitalOrFacility,
     'ผู้บันทึก': f.recordedBy,
   }));
@@ -214,7 +216,7 @@ export function exportAllDataToExcel(
   const logsData = logs.map((l, idx) => ({
     'ลำดับ': idx + 1,
     'รหัสผู้ป่วย': l.patientId,
-    'วันที่': l.date,
+    'วันที่': formatDate(l.date),
     'ทานยา': l.takenMedication ? 'ทานครบ' : 'ไม่ทาน/ลืม',
     'เวลาทาน': l.medicationTime || '-',
     'ผู้กำกับการทาน (DOTS)': l.supervisorType,

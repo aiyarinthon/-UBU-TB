@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { ContactPerson, Patient, UserProfile } from '../types';
 import { ContactCriteriaModal } from './ContactCriteriaModal';
+import { formatThaiDate, getYearBE } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -64,7 +65,7 @@ export const ContactFormModal: React.FC<Props> = ({
     const contactType = defaultContactType || 'household';
 
     return {
-      id: `CT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: `CT-${getYearBE()}-${Math.floor(1000 + Math.random() * 9000)}`,
       indexPatientId: selectedPatient?.id || '',
       indexPatientHN: selectedPatient?.hn || '',
       indexPatientName: selectedPatient?.fullName || '',
@@ -80,6 +81,10 @@ export const ContactFormModal: React.FC<Props> = ({
       protocolType: 'cxr_4_times',
       ntipStatus: 'not_entered',
       ntipKeyCode: '',
+      ntipCodeRound1: '',
+      ntipCodeRound2: '',
+      ntipCodeRound3: '',
+      ntipCodeRound4: '',
       ntipKeyDate: '',
       ntipNotes: '',
       cxrStatus: 'pending',
@@ -102,6 +107,10 @@ export const ContactFormModal: React.FC<Props> = ({
     if (initialData) {
       setFormData({
         ...initialData,
+        ntipCodeRound1: initialData.ntipCodeRound1 || '',
+        ntipCodeRound2: initialData.ntipCodeRound2 || '',
+        ntipCodeRound3: initialData.ntipCodeRound3 || '',
+        ntipCodeRound4: initialData.ntipCodeRound4 || '',
         ntipNotes: initialData.ntipNotes || '',
         cxrStatus: initialData.cxrStatus || (initialData.screeningStatus === 'screened_normal' ? 'done' : 'pending'),
         cxrRound: initialData.cxrRound || 'cxr_1_0m',
@@ -141,6 +150,23 @@ export const ContactFormModal: React.FC<Props> = ({
     }
   };
 
+  const handleRoundCodeChange = (round: 1 | 2 | 3 | 4, value: string) => {
+    setFormData(prev => {
+      const updated = { ...prev };
+      if (round === 1) updated.ntipCodeRound1 = value;
+      else if (round === 2) updated.ntipCodeRound2 = value;
+      else if (round === 3) updated.ntipCodeRound3 = value;
+      else if (round === 4) updated.ntipCodeRound4 = value;
+
+      const hasAny = !!(updated.ntipCodeRound1 || updated.ntipCodeRound2 || updated.ntipCodeRound3 || updated.ntipCodeRound4 || updated.ntipKeyCode);
+      if (hasAny && updated.ntipStatus === 'not_entered') {
+        updated.ntipStatus = 'entered';
+        if (!updated.ntipKeyDate) updated.ntipKeyDate = new Date().toISOString().split('T')[0];
+      }
+      return updated;
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.fullName || !formData.hn) {
@@ -153,7 +179,10 @@ export const ContactFormModal: React.FC<Props> = ({
       return;
     }
 
-    if (formData.ntipStatus === 'entered' && !formData.ntipKeyCode) {
+    const hasAnyRoundCode = !!(formData.ntipCodeRound1 || formData.ntipCodeRound2 || formData.ntipCodeRound3 || formData.ntipCodeRound4);
+    const primaryNtipCode = formData.ntipKeyCode || formData.ntipCodeRound1 || formData.ntipCodeRound2 || formData.ntipCodeRound3 || formData.ntipCodeRound4 || '';
+
+    if (formData.ntipStatus === 'entered' && !primaryNtipCode && !hasAnyRoundCode) {
       setErrorMsg('กรณีเลือกสถานะคีย์ n-tip แล้ว กรุณาระบุรหัสที่คีย์ใน n-tip');
       return;
     }
@@ -171,7 +200,7 @@ export const ContactFormModal: React.FC<Props> = ({
           : formData.screeningStatus || 'pending_screening';
 
       const contactToSave: ContactPerson = {
-        id: formData.id || `CT-${Date.now()}`,
+        id: formData.id || `CT-${getYearBE()}-${Date.now()}`,
         indexPatientId: formData.indexPatientId!,
         indexPatientHN: formData.indexPatientHN || '',
         indexPatientName: formData.indexPatientName || '',
@@ -185,9 +214,13 @@ export const ContactFormModal: React.FC<Props> = ({
         phone: formData.phone || '',
         email: formData.email || '',
         protocolType: calculatedProtocol,
-        ntipStatus: formData.ntipStatus || 'not_entered',
-        ntipKeyCode: formData.ntipKeyCode || '',
-        ntipKeyDate: formData.ntipStatus === 'entered' ? (formData.ntipKeyDate || new Date().toISOString().split('T')[0]) : '',
+        ntipStatus: (hasAnyRoundCode || formData.ntipStatus === 'entered') ? 'entered' : 'not_entered',
+        ntipKeyCode: primaryNtipCode,
+        ntipCodeRound1: formData.ntipCodeRound1 || '',
+        ntipCodeRound2: formData.ntipCodeRound2 || '',
+        ntipCodeRound3: formData.ntipCodeRound3 || '',
+        ntipCodeRound4: formData.ntipCodeRound4 || '',
+        ntipKeyDate: (formData.ntipStatus === 'entered' || hasAnyRoundCode) ? (formData.ntipKeyDate || new Date().toISOString().split('T')[0]) : '',
         ntipNotes: formData.ntipNotes || '',
         cxrStatus: formData.cxrStatus || 'not_done',
         cxrRound: formData.cxrRound || 'cxr_1_0m',
@@ -549,10 +582,17 @@ export const ContactFormModal: React.FC<Props> = ({
               {/* Date, Hospital, Next CXR Date */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-teal-700" />
-                    วันที่ตรวจเอกซเรย์ปอด (CXR Date)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-teal-700" />
+                      วันที่ตรวจเอกซเรย์ปอด (CXR Date)
+                    </label>
+                    {formData.cxrDate && (
+                      <span className="text-[10px] text-teal-700 font-bold bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">
+                        พ.ศ. {formatThaiDate(formData.cxrDate)}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="date"
                     value={formData.cxrDate || ''}
@@ -589,14 +629,21 @@ export const ContactFormModal: React.FC<Props> = ({
                       <Clock className="w-3.5 h-3.5 text-teal-700" />
                       วันนัดตรวจ CXR ครั้งถัดไป
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleAutoNextCxrDate}
-                      className="text-[10px] text-teal-700 hover:text-teal-900 font-bold hover:underline cursor-pointer"
-                      title="คำนวณวันนัดถัดไป 6 เดือนข้างหน้าโดยอัตโนมัติ"
-                    >
-                      +6 เดือน
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {formData.nextCxrDate && (
+                        <span className="text-[10px] text-teal-700 font-bold bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">
+                          พ.ศ. {formatThaiDate(formData.nextCxrDate)}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleAutoNextCxrDate}
+                        className="text-[10px] text-teal-700 hover:text-teal-900 font-bold hover:underline cursor-pointer"
+                        title="คำนวณวันนัดถัดไป 6 เดือนข้างหน้าโดยอัตโนมัติ"
+                      >
+                        +6 เดือน
+                      </button>
+                    </div>
                   </div>
                   <input
                     type="date"
@@ -732,24 +779,25 @@ export const ContactFormModal: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* 4. NTIP Information & Key Code พร้อมหมายเหตุการคีย์ */}
-            <div className="bg-purple-50/60 border border-purple-200 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-2xs">
+            {/* 4. NTIP Information & Key Code ครบทั้ง 4 ครั้ง พร้อมหมายเหตุการคีย์ */}
+            <div className="bg-purple-50/60 border border-purple-200 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xs">
               <div className="flex items-center justify-between border-b border-purple-100 pb-2.5">
                 <h3 className="text-xs font-bold text-purple-950 flex items-center gap-2">
                   <div className="w-7 h-7 rounded-xl bg-purple-700 text-white flex items-center justify-center shadow-xs">
                     <FileKey className="w-3.5 h-3.5" />
                   </div>
-                  4. ข้อมูลการบันทึกเข้าโปรแกรม NTIP และช่องการคีย์ N-tip พร้อมหมายเหตุ
+                  4. ข้อมูลการบันทึกเข้าโปรแกรม NTIP (รหัสคีย์ N-tip ครบทั้ง 4 ครั้งตามรอบ CXR)
                 </h3>
                 <span className="text-[10px] text-purple-800 bg-purple-100 font-semibold px-2 py-0.5 rounded-md border border-purple-200">
                   ระบบ NTIP กองวัณโรค
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Status & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    สถานะการคีย์ใน n-tip *
+                    สถานะการคีย์ในระบบ NTIP *
                   </label>
                   <select
                     value={formData.ntipStatus}
@@ -769,22 +817,16 @@ export const ContactFormModal: React.FC<Props> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    รหัสที่คีย์ใน n-tip (NTIP Code) {formData.ntipStatus === 'entered' && '*'}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="เช่น NTIP-2026-C01429-01"
-                    value={formData.ntipKeyCode || ''}
-                    onChange={(e) => setFormData({ ...formData, ntipKeyCode: e.target.value })}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    วันที่คีย์ n-tip
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      วันที่คีย์ n-tip ล่าสุด
+                    </label>
+                    {formData.ntipKeyDate && (
+                      <span className="text-[10px] text-purple-700 font-bold bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200">
+                        พ.ศ. {formatThaiDate(formData.ntipKeyDate)}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="date"
                     value={formData.ntipKeyDate || ''}
@@ -794,7 +836,112 @@ export const ContactFormModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* ช่องการคีย์ N-tip พร้อมหมายเหตุ */}
+              {/* 4-Round N-tip Code Keying Grid */}
+              <div className="p-3.5 bg-white border border-purple-200/90 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-purple-950 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-700" />
+                    รหัสที่คีย์ใน n-tip แยกตามรอบการตรวจ CXR (คีย์ครบทั้ง 4 ครั้ง)
+                  </span>
+                  <span className="text-[10px] bg-purple-50 text-purple-800 font-semibold px-2 py-0.5 rounded border border-purple-200">
+                    บันทึกแล้ว {
+                      [formData.ntipCodeRound1, formData.ntipCodeRound2, formData.ntipCodeRound3, formData.ntipCodeRound4].filter(c => !!c && c.trim() !== '').length
+                    } / 4 ครั้ง
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Round 1 */}
+                  <div className="p-2.5 rounded-lg bg-purple-50/40 border border-purple-100 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-purple-900 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-purple-700 text-white text-[9px] font-bold flex items-center justify-center">1</span>
+                        CXR ครั้งที่ 1 (แรกรับ / Baseline 0M)
+                      </label>
+                      {formData.ntipCodeRound1 && (
+                        <span className="text-[9px] text-emerald-700 font-bold flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> คีย์แล้ว
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="เช่น NTIP-69-C01429-01"
+                      value={formData.ntipCodeRound1 || ''}
+                      onChange={(e) => handleRoundCodeChange(1, e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-200 rounded-lg font-mono focus:ring-2 focus:ring-purple-500 placeholder:text-slate-300"
+                    />
+                  </div>
+
+                  {/* Round 2 */}
+                  <div className="p-2.5 rounded-lg bg-purple-50/40 border border-purple-100 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-purple-900 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-purple-700 text-white text-[9px] font-bold flex items-center justify-center">2</span>
+                        CXR ครั้งที่ 2 (ติดตาม 6 เดือน / Month 6)
+                      </label>
+                      {formData.ntipCodeRound2 && (
+                        <span className="text-[9px] text-emerald-700 font-bold flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> คีย์แล้ว
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="เช่น NTIP-69-C01429-02"
+                      value={formData.ntipCodeRound2 || ''}
+                      onChange={(e) => handleRoundCodeChange(2, e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-200 rounded-lg font-mono focus:ring-2 focus:ring-purple-500 placeholder:text-slate-300"
+                    />
+                  </div>
+
+                  {/* Round 3 */}
+                  <div className="p-2.5 rounded-lg bg-purple-50/40 border border-purple-100 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-purple-900 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-purple-700 text-white text-[9px] font-bold flex items-center justify-center">3</span>
+                        CXR ครั้งที่ 3 (ติดตาม 12 เดือน / Month 12)
+                      </label>
+                      {formData.ntipCodeRound3 && (
+                        <span className="text-[9px] text-emerald-700 font-bold flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> คีย์แล้ว
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="เช่น NTIP-69-C01429-03"
+                      value={formData.ntipCodeRound3 || ''}
+                      onChange={(e) => handleRoundCodeChange(3, e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-200 rounded-lg font-mono focus:ring-2 focus:ring-purple-500 placeholder:text-slate-300"
+                    />
+                  </div>
+
+                  {/* Round 4 */}
+                  <div className="p-2.5 rounded-lg bg-purple-50/40 border border-purple-100 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-purple-900 flex items-center gap-1">
+                        <span className="w-4 h-4 rounded-full bg-purple-700 text-white text-[9px] font-bold flex items-center justify-center">4</span>
+                        CXR ครั้งที่ 4 (ติดตาม 18-24 เดือน / Month 18)
+                      </label>
+                      {formData.ntipCodeRound4 && (
+                        <span className="text-[9px] text-emerald-700 font-bold flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> คีย์แล้ว
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="เช่น NTIP-69-C01429-04"
+                      value={formData.ntipCodeRound4 || ''}
+                      onChange={(e) => handleRoundCodeChange(4, e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-200 rounded-lg font-mono focus:ring-2 focus:ring-purple-500 placeholder:text-slate-300"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* หมายเหตุการคีย์ N-tip */}
               <div>
                 <label className="block text-[11px] font-semibold text-purple-950 mb-1 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -807,7 +954,7 @@ export const ContactFormModal: React.FC<Props> = ({
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="เช่น บันทึกข้อมูลและเชื่อมโยงผู้ป่วยดัชนีแล้ว, รอยืนยันรหัสจากโปรแกรม NTIP, บันทึกผล CXR รอบที่ 1 แล้ว"
+                  placeholder="เช่น บันทึกข้อมูลและเชื่อมโยงผู้ป่วยดัชนีแล้ว, คีย์ครบทั้ง 4 ครั้งแล้ว, รอยืนยันรหัสจากโปรแกรม NTIP..."
                   value={formData.ntipNotes || ''}
                   onChange={(e) => setFormData({ ...formData, ntipNotes: e.target.value })}
                   className="w-full px-3 py-2 text-xs bg-white border border-purple-200 rounded-xl focus:ring-2 focus:ring-purple-500 placeholder:text-slate-400"
@@ -817,6 +964,7 @@ export const ContactFormModal: React.FC<Props> = ({
                   <span className="text-[10px] text-purple-600 font-medium">ข้อความแนะนำ:</span>
                   {[
                     'บันทึกข้อมูลเข้าระบบ NTIP และเชื่อมโยงผู้ป่วยดัชนีเรียบร้อย',
+                    'คีย์รหัส N-tip ครบทั้ง 4 ครั้งตามรอบการตรวจ CXR',
                     'รอผลเอกซเรย์ปอดเพื่ออัปเดตในระบบ NTIP',
                     'ประสานคลินิกวัณโรค/รพ.สต. เพื่อติดตามคีย์ข้อมูล n-tip',
                     'บันทึกข้อมูลผู้สัมผัสเด็กรับยาป้องกัน TPT แล้ว',

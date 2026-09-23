@@ -32,6 +32,7 @@ interface Props {
   onConfigChange: (id: string, url: string, name: string) => void;
   onRefreshData: () => void;
   onPushAllData?: () => void;
+  onOpenImportModal?: (mode: 'patient' | 'contact') => void;
   isLoading: boolean;
   onTokenUpdate?: (token: string) => void;
   isAutoSyncEnabled?: boolean;
@@ -49,6 +50,7 @@ export const SheetConfigBanner: React.FC<Props> = ({
   onConfigChange,
   onRefreshData,
   onPushAllData,
+  onOpenImportModal,
   isLoading,
   onTokenUpdate,
   isAutoSyncEnabled = true,
@@ -482,6 +484,17 @@ export const SheetConfigBanner: React.FC<Props> = ({
             </button>
           )}
 
+          {onOpenImportModal && (
+            <button
+              onClick={() => onOpenImportModal('patient')}
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[11px] transition shadow-2xs cursor-pointer"
+              title="นำเข้าข้อมูลผู้ป่วยและกลุ่มเสี่ยงจาก Google Sheet"
+            >
+              <FileSpreadsheet className="w-3 h-3" />
+              <span>นำเข้าข้อมูล</span>
+            </button>
+          )}
+
           {spreadsheetUrl && (
             <a
               href={spreadsheetUrl}
@@ -611,6 +624,17 @@ export const SheetConfigBanner: React.FC<Props> = ({
           >
             <UploadCloud className={`w-3.5 h-3.5 ${isLoading ? 'animate-bounce' : ''}`} />
             <span>ส่งข้อมูลขึ้น Sheet</span>
+          </button>
+        )}
+
+        {onOpenImportModal && (
+          <button
+            onClick={() => onOpenImportModal('patient')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition disabled:opacity-50 shadow-2xs cursor-pointer"
+            title="นำเข้าข้อมูลผู้ป่วยและกลุ่มเสี่ยงจาก Google Sheet"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>นำเข้าข้อมูลจาก Sheet</span>
           </button>
         )}
 

@@ -117,7 +117,11 @@ export const CONTACT_HEADERS = [
   'ผลตรวจเอกซเรย์ปอด (CXR Result)',
   'รายละเอียดผลตรวจ CXR',
   'สถานพยาบาลที่ตรวจ CXR',
-  'วันนัดตรวจ CXR ครั้งถัดไป'
+  'วันนัดตรวจ CXR ครั้งถัดไป',
+  'รหัส NTIP ครั้งที่ 1 (0M)',
+  'รหัส NTIP ครั้งที่ 2 (6M)',
+  'รหัส NTIP ครั้งที่ 3 (12M)',
+  'รหัส NTIP ครั้งที่ 4 (18M)'
 ];
 
 export const FOLLOW_UP_HEADERS = [
@@ -136,7 +140,11 @@ export const FOLLOW_UP_HEADERS = [
   'สูตรยาป้องกัน (TPT)',
   'สถานพยาบาลที่ตรวจ',
   'ผู้บันทึกข้อมูล',
-  'หมายเหตุ'
+  'หมายเหตุ',
+  'รหัส NTIP ครั้งที่ 1',
+  'รหัส NTIP ครั้งที่ 2',
+  'รหัส NTIP ครั้งที่ 3',
+  'รหัส NTIP ครั้งที่ 4'
 ];
 
 export const DAILY_LOG_HEADERS = [
@@ -891,6 +899,10 @@ export async function fetchAllContacts(accessToken: string, spreadsheetId: strin
       cxrResultDetail: row[27] || '',
       cxrHospital: row[28] || '',
       nextCxrDate: row[29] || '',
+      ntipCodeRound1: row[30] || '',
+      ntipCodeRound2: row[31] || '',
+      ntipCodeRound3: row[32] || '',
+      ntipCodeRound4: row[33] || '',
     };
   }).filter((c): c is ContactPerson => c !== null);
 
@@ -942,6 +954,10 @@ export async function saveContactToSheet(accessToken: string, spreadsheetId: str
       contact.cxrResultDetail || '',
       contact.cxrHospital || '',
       contact.nextCxrDate || '',
+      contact.ntipCodeRound1 || '',
+      contact.ntipCodeRound2 || '',
+      contact.ntipCodeRound3 || '',
+      contact.ntipCodeRound4 || '',
     ],
   ];
 
@@ -986,7 +1002,7 @@ export async function saveContactToSheet(accessToken: string, spreadsheetId: str
   } else {
     const sheetRowNum = rowIndex + 1;
     const doUpdate = () => fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(CONTACTS_SHEET_NAME, `A${sheetRowNum}:AD${sheetRowNum}`)}?valueInputOption=USER_ENTERED`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(CONTACTS_SHEET_NAME, `A${sheetRowNum}:AH${sheetRowNum}`)}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -1000,7 +1016,7 @@ export async function saveContactToSheet(accessToken: string, spreadsheetId: str
 // ------------------- FOLLOW-UP OPERATIONS -------------------
 
 export async function fetchAllFollowUps(accessToken: string, spreadsheetId: string): Promise<ContactFollowUp[]> {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(FOLLOW_UPS_SHEET_NAME, 'A2:P5000')}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(FOLLOW_UPS_SHEET_NAME, 'A2:T5000')}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) return [];
 
@@ -1025,6 +1041,10 @@ export async function fetchAllFollowUps(accessToken: string, spreadsheetId: stri
       hospitalOrFacility: row[13] || '',
       recordedBy: row[14] || '',
       notes: row[15] || '',
+      ntipCodeRound1: row[16] || '',
+      ntipCodeRound2: row[17] || '',
+      ntipCodeRound3: row[18] || '',
+      ntipCodeRound4: row[19] || '',
     };
   }).filter(f => f.id && f.contactId);
 }
@@ -1048,6 +1068,10 @@ export async function saveFollowUpToSheet(accessToken: string, spreadsheetId: st
       fu.hospitalOrFacility || '',
       fu.recordedBy,
       fu.notes || '',
+      fu.ntipCodeRound1 || '',
+      fu.ntipCodeRound2 || '',
+      fu.ntipCodeRound3 || '',
+      fu.ntipCodeRound4 || '',
     ],
   ];
 
@@ -1075,7 +1099,7 @@ export async function saveFollowUpToSheet(accessToken: string, spreadsheetId: st
   } else {
     const sheetRowNum = rowIndex + 1;
     const doUpdate = () => fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(FOLLOW_UPS_SHEET_NAME, `A${sheetRowNum}:P${sheetRowNum}`)}?valueInputOption=USER_ENTERED`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(FOLLOW_UPS_SHEET_NAME, `A${sheetRowNum}:T${sheetRowNum}`)}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },

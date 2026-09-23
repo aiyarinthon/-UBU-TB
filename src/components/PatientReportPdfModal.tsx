@@ -22,6 +22,7 @@ import {
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { Patient, InvestigationForm, ContactPerson, DailyLog, UserProfile } from '../types';
+import { formatThaiDate, formatThaiDateTime } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -143,11 +144,7 @@ export const PatientReportPdfModal: React.FC<Props> = ({
     }
   };
 
-  const reportDateFormatted = new Date().toLocaleDateString('th-TH', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  const reportDateFormatted = formatThaiDate(new Date(), { short: false });
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static">
@@ -253,7 +250,7 @@ export const PatientReportPdfModal: React.FC<Props> = ({
             <div className="font-bold text-xs text-slate-900 bg-slate-100 px-2 py-1 rounded-sm flex items-center justify-between">
               <span>1. ข้อมูลทั่วไปและประวัติการขึ้นทะเบียน (Patient Demographics & Registration)</span>
               <span className="text-[10px] font-normal text-slate-600">
-                วันขึ้นทะเบียน NTIP: {patient.ntipRegistrationDate ? new Date(patient.ntipRegistrationDate).toLocaleDateString('th-TH') : '-'}
+                วันขึ้นทะเบียน NTIP: {patient.ntipRegistrationDate ? formatThaiDate(patient.ntipRegistrationDate) : '-'}
               </span>
             </div>
 
@@ -281,7 +278,7 @@ export const PatientReportPdfModal: React.FC<Props> = ({
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
-              <div><strong>วันที่วินิจฉัย:</strong> {patient.diagnosisDate ? new Date(patient.diagnosisDate).toLocaleDateString('th-TH') : '-'}</div>
+              <div><strong>วันที่วินิจฉัย:</strong> {patient.diagnosisDate ? formatThaiDate(patient.diagnosisDate) : '-'}</div>
               <div><strong>ประเภทผู้ป่วย:</strong> {patient.treatmentCategory || 'ผู้ป่วยรายใหม่ (Cat 1 New)'}</div>
               <div className="col-span-2"><strong>การจำแนกโรค:</strong> {patient.tbClassification || 'Pulmonary (Bacteriologically Confirmed)'}</div>
               <div><strong>สูตรยาที่ได้รับ:</strong> <span className="font-bold text-slate-900">{patient.treatmentRegimen || '2HRZE/4HR'}</span></div>
@@ -309,13 +306,13 @@ export const PatientReportPdfModal: React.FC<Props> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] pt-1">
               <div>
-                <strong>วันที่เริ่มมีอาการ (Onset):</strong> {investigation?.symptomOnsetDate ? new Date(investigation.symptomOnsetDate).toLocaleDateString('th-TH') : (patient.diagnosisDate ? new Date(patient.diagnosisDate).toLocaleDateString('th-TH') : '-')}
+                <strong>วันที่เริ่มมีอาการ (Onset):</strong> {investigation?.symptomOnsetDate ? formatThaiDate(investigation.symptomOnsetDate) : (patient.diagnosisDate ? formatThaiDate(patient.diagnosisDate) : '-')}
               </div>
               <div>
-                <strong>วันที่ตรวจพบ/วินิจฉัย:</strong> {patient.diagnosisDate ? new Date(patient.diagnosisDate).toLocaleDateString('th-TH') : '-'}
+                <strong>วันที่ตรวจพบ/วินิจฉัย:</strong> {patient.diagnosisDate ? formatThaiDate(patient.diagnosisDate) : '-'}
               </div>
               <div>
-                <strong>วันที่พบแพทย์ครั้งแรก:</strong> {investigation?.firstDoctorVisitDate ? new Date(investigation.firstDoctorVisitDate).toLocaleDateString('th-TH') : '-'}
+                <strong>วันที่พบแพทย์ครั้งแรก:</strong> {investigation?.firstDoctorVisitDate ? formatThaiDate(investigation.firstDoctorVisitDate) : '-'}
               </div>
             </div>
 
@@ -323,7 +320,7 @@ export const PatientReportPdfModal: React.FC<Props> = ({
             <div className="p-2 bg-teal-50/70 border border-teal-200 rounded-lg text-[11px] leading-relaxed">
               <strong className="text-teal-950">⏱️ ช่วงเวลาแพร่กระจายเชื้อของผู้ป่วย (Infectious Period Window):</strong>{' '}
               <span>
-                ตั้งแต่ <strong>{defaultInfectiousStart ? new Date(defaultInfectiousStart).toLocaleDateString('th-TH') : '-'}</strong> ถึง <strong>{defaultInfectiousEnd ? new Date(defaultInfectiousEnd).toLocaleDateString('th-TH') : '-'}</strong>{' '}
+                ตั้งแต่ <strong>{defaultInfectiousStart ? formatThaiDate(defaultInfectiousStart) : '-'}</strong> ถึง <strong>{defaultInfectiousEnd ? formatThaiDate(defaultInfectiousEnd) : '-'}</strong>{' '}
                 <span className="text-slate-600">(คำนวณย้อนหลัง 3 เดือนก่อนเริ่มมีอาการ จนถึงหลังรับประทานยาต้านวัณโรค 2 สัปดาห์)</span>
               </span>
             </div>
@@ -352,14 +349,14 @@ export const PatientReportPdfModal: React.FC<Props> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] pt-1">
               <div className="space-y-1">
                 <div><strong>ประเภทวัณโรค:</strong> {patient.tbClassification || 'Pulmonary (Bacteriologically Confirmed)'}</div>
-                <div><strong>ผลตรวจเสมหะ (AFB Smear):</strong> <span className="font-bold text-slate-900">{investigation?.afbSmearResult || 'Negative'}</span> {investigation?.afbSmearDate ? `(วันที่: ${new Date(investigation.afbSmearDate).toLocaleDateString('th-TH')})` : ''}</div>
-                <div><strong>ผลตรวจโมเลกุล (GeneXpert MTB/RIF):</strong> {investigation?.geneXpertResult || 'Not done'} {investigation?.geneXpertDate ? `(วันที่: ${new Date(investigation.geneXpertDate).toLocaleDateString('th-TH')})` : ''}</div>
+                <div><strong>ผลตรวจเสมหะ (AFB Smear):</strong> <span className="font-bold text-slate-900">{investigation?.afbSmearResult || 'Negative'}</span> {investigation?.afbSmearDate ? `(วันที่: ${formatThaiDate(investigation.afbSmearDate)})` : ''}</div>
+                <div><strong>ผลตรวจโมเลกุล (GeneXpert MTB/RIF):</strong> {investigation?.geneXpertResult || 'Not done'} {investigation?.geneXpertDate ? `(วันที่: ${formatThaiDate(investigation.geneXpertDate)})` : ''}</div>
                 <div><strong>ผลการเพาะเชื้อ (Culture MTB):</strong> {investigation?.cultureResult || 'รอผล / ไม่ได้ส่งตรวจ'}</div>
               </div>
 
               <div className="space-y-1">
                 <div><strong>ผลตรวจภาพรังสีทรวงอก (CXR แรกรับ):</strong> {investigation?.initialCxrResult || 'Infiltration / Cavitary lesion'}</div>
-                <div><strong>วันที่ตรวจ CXR:</strong> {investigation?.initialCxrDate ? new Date(investigation.initialCxrDate).toLocaleDateString('th-TH') : '-'}</div>
+                <div><strong>วันที่ตรวจ CXR:</strong> {investigation?.initialCxrDate ? formatThaiDate(investigation.initialCxrDate) : '-'}</div>
                 <div>
                   <strong>โรคร่วม / ปัจจัยเสี่ยง:</strong>{' '}
                   {[
@@ -476,14 +473,14 @@ export const PatientReportPdfModal: React.FC<Props> = ({
               <div className="space-y-1">
                 <div>(<strong>{investigation?.investigatorName || currentUserProfile?.displayName || '..........................................................'}</strong>)</div>
                 <div className="text-slate-600">ตำแหน่ง: {investigation?.investigatorPosition || currentUserProfile?.position || 'พยาบาลวิชาชีพ / เจ้าหน้าที่สอบสวนโรค'}</div>
-                <div className="text-slate-600">วันที่: {investigation?.investigationDate ? new Date(investigation.investigationDate).toLocaleDateString('th-TH') : reportDateFormatted}</div>
+                <div className="text-slate-600">วันที่: {investigation?.investigationDate ? formatThaiDate(investigation.investigationDate) : reportDateFormatted}</div>
               </div>
             </div>
           </div>
 
           {/* Document Footer Note */}
           <div className="text-[10px] text-slate-400 text-center pt-2">
-            เอกสารฉบับนี้ออกโดยระบบบริหารจัดการและติดตามผู้ป่วยวัณโรค โรงพยาบาลมหาวิทยาลัยอุบลราชธานี • วันที่พิมพ์: {new Date().toLocaleString('th-TH')}
+            เอกสารฉบับนี้ออกโดยระบบบริหารจัดการและติดตามผู้ป่วยวัณโรค โรงพยาบาลมหาวิทยาลัยอุบลราชธานี • วันที่พิมพ์: {formatThaiDateTime(new Date())}
           </div>
 
         </div>

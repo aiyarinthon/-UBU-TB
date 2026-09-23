@@ -22,6 +22,7 @@ import {
 import { Patient, InvestigationForm, UserProfile } from '../types';
 import { ContactCriteriaModal } from './ContactCriteriaModal';
 import { InvestigationPrintModal } from './InvestigationPrintModal';
+import { getYearBE, formatThaiDate } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -47,8 +48,7 @@ export const InvestigationModal: React.FC<Props> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Form State initialized based on guidelines 2563/2566
-  const [formData, setFormData] = useState<Partial<InvestigationForm>>(() => {
+  const buildInitialFormData = (): Partial<InvestigationForm> => {
     const defaultInvestigatorName = existingInvestigation?.investigatorName || currentUserProfile?.displayName || '';
     const defaultInvestigatorPosition = existingInvestigation?.investigatorPosition || currentUserProfile?.position || 'นักวิชาการสาธารณสุข / รพ.มหาวิทยาลัยอุบลราชธานี';
 
@@ -67,8 +67,16 @@ export const InvestigationModal: React.FC<Props> = ({
     const endDateObj = new Date(diagDate);
     endDateObj.setDate(endDateObj.getDate() + 14);
 
+    const initialHouseholdCount = patient.householdContactsCount !== undefined && patient.householdContactsCount !== null
+      ? patient.householdContactsCount
+      : 1;
+
+    const initialNonHouseholdCount = patient.nonHouseholdContactsCount !== undefined && patient.nonHouseholdContactsCount !== null
+      ? patient.nonHouseholdContactsCount
+      : 0;
+
     return {
-      id: `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: `INV-${getYearBE()}-${Math.floor(1000 + Math.random() * 9000)}`,
       patientId: patient.id,
       patientHN: patient.hn,
       patientName: patient.fullName,
@@ -112,16 +120,27 @@ export const InvestigationModal: React.FC<Props> = ({
         homeType: 'บ้านเดี่ยว',
         ventilation: 'ปานกลาง',
         totalRooms: 2,
-        totalResidents: 3,
+        totalResidents: initialHouseholdCount + 1,
       },
-      householdContactsCount: patient.householdContactsCount || 2,
+      householdContactsCount: initialHouseholdCount,
       under5ContactsCount: 0,
-      nonHouseholdContactsCount: patient.nonHouseholdContactsCount || 1,
+      nonHouseholdContactsCount: initialNonHouseholdCount,
       riskAssessmentNotes: 'ผู้ป่วยมีผลเสมหะพบเชื้อ (Smear Positive) ถือเป็นแหล่งแพร่กระจายเชื้อ ควรกำชับให้สวมหน้ากากอนามัย และเร่งคัดกรองผู้สัมผัสร่วมบ้านโดยด่วน',
       controlMeasures: '1. แยกห้องนอนและจัดสภาพแวดล้อมให้เปิดหน้าต่างระบายอากาศ\n2. ส่งตรวจคัดกรองผู้สัมผัสร่วมบ้านตามเกณฑ์ (CXR 4 ครั้งสำหรับผู้ใหญ่, IGRA/TPT สำหรับเด็กเล็ก)\n3. ให้สุขศึกษาเรื่องการป้องกันการแพร่กระจายเชื้อทางละอองฝอย',
       supervisorReviewerName: patient.doctorName || 'แพทย์ผู้รับผิดชอบงานควบคุมวัณโรค',
     };
-  });
+  };
+
+  // Form State initialized based on guidelines 2563/2566
+  const [formData, setFormData] = useState<Partial<InvestigationForm>>(buildInitialFormData);
+
+  // Re-sync form state whenever modal is opened or target patient/investigation changes
+  useEffect(() => {
+    if (isOpen) {
+      setFormData(buildInitialFormData());
+      setErrorMsg(null);
+    }
+  }, [isOpen, patient.id, existingInvestigation?.id]);
 
   // When currentUserProfile loads or changes and investigatorName is blank, auto populate
   useEffect(() => {

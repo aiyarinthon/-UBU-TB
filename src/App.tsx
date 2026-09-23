@@ -47,6 +47,7 @@ import { ContactFollowUpModal } from './components/ContactFollowUpModal';
 import { ContactsView } from './components/ContactsView';
 import { BackendAdminModal } from './components/BackendAdminModal';
 import { LoginModal } from './components/LoginModal';
+import { ImportGoogleSheetModal } from './components/ImportGoogleSheetModal';
 import { 
   Activity, 
   Users, 
@@ -108,6 +109,8 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isBackendAdminModalOpen, setIsBackendAdminModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importModalMode, setImportModalMode] = useState<'patient' | 'contact'>('patient');
 
   // Sync token changes to localStorage
   useEffect(() => {
@@ -396,7 +399,22 @@ export default function App() {
       ]);
 
       if (fetchedPatients.length > 0 || fetchedContacts.length > 0 || fetchedLogs.length > 0) {
-        setPatients(fetchedPatients);
+        // Reconcile patient contact numbers accurately with investigation forms & registered contacts
+        const reconciledPatients = fetchedPatients.map(p => {
+          const inv = fetchedInvestigations.find(i => i.patientId === p.id || (i.patientHN && p.hn && i.patientHN.toLowerCase() === p.hn.toLowerCase()));
+          const pContacts = fetchedContacts.filter(c => c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase()));
+          const regHousehold = pContacts.filter(c => c.contactType === 'household').length;
+          const regNonHousehold = pContacts.filter(c => c.contactType === 'non_household').length;
+          
+          return {
+            ...p,
+            householdContactsCount: inv ? inv.householdContactsCount : (regHousehold > 0 ? regHousehold : p.householdContactsCount),
+            nonHouseholdContactsCount: inv ? inv.nonHouseholdContactsCount : (regNonHousehold > 0 ? regNonHousehold : p.nonHouseholdContactsCount),
+            investigationStatus: inv ? 'completed' : p.investigationStatus,
+          };
+        });
+
+        setPatients(reconciledPatients);
         setDailyLogs(fetchedLogs);
         setInvestigations(fetchedInvestigations);
         setContacts(fetchedContacts);
@@ -404,10 +422,10 @@ export default function App() {
         
         // Update selected patient if currently viewing
         if (selectedPatient) {
-          const updated = fetchedPatients.find(p => p.id === selectedPatient.id);
+          const updated = reconciledPatients.find(p => p.id === selectedPatient.id);
           if (updated) setSelectedPatient(updated);
         }
-        showToast('success', `ซิงค์ข้อมูลจาก Google Sheet สำเร็จ (${fetchedPatients.length} ผู้ป่วย, ${fetchedContacts.length} ผู้สัมผัส, ${fetchedLogs.length} บันทึกยา)`);
+        showToast('success', `ซิงค์ข้อมูลจาก Google Sheet สำเร็จ (${reconciledPatients.length} ผู้ป่วย, ${fetchedContacts.length} ผู้สัมผัส, ${fetchedLogs.length} บันทึกยา)`);
       } else {
         showToast('success', 'เชื่อมต่อ Google Sheet สำเร็จ (ยังไม่มีข้อมูลในชีท หรือเป็นชีทใหม่)');
       }
@@ -682,14 +700,22 @@ export default function App() {
       setContacts(prev => [contactData, ...prev]);
     }
 
-    // Keep index patient contact counts in sync
+    // Keep index patient contact counts in sync accurately without inflated addition
+    const updatedContactList = isEdit 
+      ? contacts.map(c => c.id === contactData.id ? contactData : c)
+      : [contactData, ...contacts];
+
     setPatients(prev => prev.map(p => {
-      if (p.id === contactData.indexPatientId || (contactData.indexPatientHN && p.hn === contactData.indexPatientHN)) {
-        const isHousehold = contactData.contactType === 'household';
+      if (p.id === contactData.indexPatientId || (contactData.indexPatientHN && p.hn && contactData.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) {
+        const inv = investigations.find(i => i.patientId === p.id || (i.patientHN && p.hn && i.patientHN.toLowerCase() === p.hn.toLowerCase()));
+        const pConts = updatedContactList.filter(c => c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase()));
+        const regHouse = pConts.filter(c => c.contactType === 'household').length;
+        const regNonHouse = pConts.filter(c => c.contactType === 'non_household').length;
+
         return {
           ...p,
-          householdContactsCount: isHousehold ? Math.max(0, (p.householdContactsCount || 0) + (isEdit ? 0 : 1)) : p.householdContactsCount,
-          nonHouseholdContactsCount: !isHousehold ? Math.max(0, (p.nonHouseholdContactsCount || 0) + (isEdit ? 0 : 1)) : p.nonHouseholdContactsCount,
+          householdContactsCount: inv ? inv.householdContactsCount : Math.max(regHouse, p.householdContactsCount || 0),
+          nonHouseholdContactsCount: inv ? inv.nonHouseholdContactsCount : Math.max(regNonHouse, p.nonHouseholdContactsCount || 0),
         };
       }
       return p;
@@ -730,13 +756,18 @@ export default function App() {
     setFollowUps(prev => prev.filter(f => f.contactId !== contactId));
 
     if (target) {
+      const remainingContacts = contacts.filter(c => c.id !== contactId);
       setPatients(prev => prev.map(p => {
-        if (p.id === target.indexPatientId || (target.indexPatientHN && p.hn === target.indexPatientHN)) {
-          const isHousehold = target.contactType === 'household';
+        if (p.id === target.indexPatientId || (target.indexPatientHN && p.hn && target.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) {
+          const inv = investigations.find(i => i.patientId === p.id || (i.patientHN && p.hn && i.patientHN.toLowerCase() === p.hn.toLowerCase()));
+          const pConts = remainingContacts.filter(c => c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase()));
+          const regHouse = pConts.filter(c => c.contactType === 'household').length;
+          const regNonHouse = pConts.filter(c => c.contactType === 'non_household').length;
+
           return {
             ...p,
-            householdContactsCount: isHousehold ? Math.max(0, (p.householdContactsCount || 1) - 1) : p.householdContactsCount,
-            nonHouseholdContactsCount: !isHousehold ? Math.max(0, (p.nonHouseholdContactsCount || 1) - 1) : p.nonHouseholdContactsCount,
+            householdContactsCount: inv ? inv.householdContactsCount : regHouse,
+            nonHouseholdContactsCount: inv ? inv.nonHouseholdContactsCount : regNonHouse,
           };
         }
         return p;
@@ -826,6 +857,123 @@ export default function App() {
       showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
     } else {
       showToast('success', `บันทึกผลการตรวจ (${followUpData.stepType}) เรียบร้อยแล้ว`);
+    }
+  };
+
+  // 6. Bulk Import Patients from Google Sheet Tab
+  const handleImportPatients = async (importedPatients: Patient[]) => {
+    if (importedPatients.length === 0) return;
+
+    // Merge or insert into local state
+    setPatients(prev => {
+      const copy = [...prev];
+      importedPatients.forEach(newP => {
+        const existingIdx = copy.findIndex(
+          p => (p.hn && newP.hn && p.hn.toLowerCase() === newP.hn.toLowerCase()) ||
+               (p.nationalId && newP.nationalId && p.nationalId === newP.nationalId) ||
+               p.id === newP.id
+        );
+        if (existingIdx >= 0) {
+          copy[existingIdx] = { ...copy[existingIdx], ...newP, id: copy[existingIdx].id };
+        } else {
+          copy.unshift(newP);
+        }
+      });
+      return copy;
+    });
+
+    // Auto-sync into Google Sheet if connected
+    let activeToken = token;
+    if (!activeToken && spreadsheetId) {
+      try {
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (activeToken && spreadsheetId) {
+      try {
+        for (const p of importedPatients) {
+          await savePatientToSheet(activeToken, spreadsheetId, p);
+        }
+        showToast('success', `นำเข้าข้อมูลผู้ป่วย ${importedPatients.length} รายการ และซิงค์ลง Google Sheet สำเร็จ`);
+      } catch (err: any) {
+        console.error('Bulk import sync error:', err);
+        showToast('success', `นำเข้าข้อมูลผู้ป่วย ${importedPatients.length} รายการในระบบเรียบร้อย`);
+      }
+    } else {
+      showToast('success', `นำเข้าข้อมูลผู้ป่วย ${importedPatients.length} รายการเรียบร้อยแล้ว`);
+    }
+  };
+
+  // 7. Bulk Import Contacts from Google Sheet Tab
+  const handleImportContacts = async (importedContacts: ContactPerson[]) => {
+    if (importedContacts.length === 0) return;
+
+    // Merge or insert into local state
+    setContacts(prev => {
+      const copy = [...prev];
+      importedContacts.forEach(newC => {
+        const existingIdx = copy.findIndex(
+          c => (c.hn && newC.hn && c.hn.toLowerCase() === newC.hn.toLowerCase()) ||
+               (c.fullName.toLowerCase() === newC.fullName.toLowerCase() && c.indexPatientHN === newC.indexPatientHN) ||
+               c.id === newC.id
+        );
+        if (existingIdx >= 0) {
+          copy[existingIdx] = { ...copy[existingIdx], ...newC, id: copy[existingIdx].id };
+        } else {
+          copy.unshift(newC);
+        }
+      });
+      return copy;
+    });
+
+    // Update index patient contact counts
+    setPatients(prev => prev.map(p => {
+      const pConts = importedContacts.filter(c => c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase()));
+      if (pConts.length > 0) {
+        const regHouse = pConts.filter(c => c.contactType === 'household').length;
+        const regNonHouse = pConts.filter(c => c.contactType === 'non_household').length;
+        return {
+          ...p,
+          householdContactsCount: Math.max(regHouse, p.householdContactsCount || 0),
+          nonHouseholdContactsCount: Math.max(regNonHouse, p.nonHouseholdContactsCount || 0),
+        };
+      }
+      return p;
+    }));
+
+    // Auto-sync into Google Sheet if connected
+    let activeToken = token;
+    if (!activeToken && spreadsheetId) {
+      try {
+        const authRes = await googleSignIn();
+        if (authRes?.accessToken) {
+          activeToken = authRes.accessToken;
+          setToken(authRes.accessToken);
+        }
+      } catch (e) {
+        // continue
+      }
+    }
+
+    if (activeToken && spreadsheetId) {
+      try {
+        for (const c of importedContacts) {
+          await saveContactToSheet(activeToken, spreadsheetId, c);
+        }
+        showToast('success', `นำเข้าข้อมูลกลุ่มเสี่ยง ${importedContacts.length} รายการ และซิงค์ลง Google Sheet สำเร็จ`);
+      } catch (err: any) {
+        console.error('Bulk contact import sync error:', err);
+        showToast('success', `นำเข้าข้อมูลกลุ่มเสี่ยง ${importedContacts.length} รายการในระบบเรียบร้อย`);
+      }
+    } else {
+      showToast('success', `นำเข้าข้อมูลกลุ่มเสี่ยง ${importedContacts.length} รายการเรียบร้อยแล้ว`);
     }
   };
 
@@ -973,6 +1121,10 @@ export default function App() {
               onConfigChange={handleConfigChange}
               onRefreshData={loadSheetData}
               onPushAllData={handlePushAllToSheet}
+              onOpenImportModal={(mode) => {
+                setImportModalMode(mode);
+                setIsImportModalOpen(true);
+              }}
               isLoading={isDataLoading}
               onTokenUpdate={(newToken) => setToken(newToken)}
               isAutoSyncEnabled={isAutoSyncEnabled}
@@ -1165,6 +1317,10 @@ export default function App() {
                 onSearchChange={setSearchTerm}
                 statusFilter={statusFilter}
                 onStatusFilterChange={setStatusFilter}
+                onOpenImportModal={(mode) => {
+                  setImportModalMode(mode);
+                  setIsImportModalOpen(true);
+                }}
               />
             ) : activeTab === 'contacts' ? (
               <ContactsView
@@ -1189,6 +1345,10 @@ export default function App() {
                 }}
                 onDeleteContact={handleDeleteContact}
                 spreadsheetUrl={spreadsheetUrl}
+                onOpenImportModal={(mode) => {
+                  setImportModalMode(mode);
+                  setIsImportModalOpen(true);
+                }}
               />
             ) : (
               <AnalyticsDashboard 
@@ -1310,8 +1470,31 @@ export default function App() {
             dailyLogs={dailyLogs}
             onClearAllData={handleClearAllData}
             onTokenUpdate={(newToken) => setToken(newToken)}
+            onOpenImportModal={(mode) => {
+              setImportModalMode(mode);
+              setIsImportModalOpen(true);
+            }}
           />
         )}
+
+        {/* Modal: Import Patients & Contacts from Google Sheets */}
+        {isImportModalOpen && (
+          <ImportGoogleSheetModal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+            accessToken={token}
+            spreadsheetId={spreadsheetId}
+            spreadsheetUrl={spreadsheetUrl}
+            spreadsheetName={spreadsheetName}
+            onTokenUpdate={(newToken) => setToken(newToken)}
+            existingPatients={patients}
+            existingContacts={contacts}
+            onImportPatients={handleImportPatients}
+            onImportContacts={handleImportContacts}
+            defaultMode={importModalMode}
+          />
+        )}
+
         {/* Modal: Login / Switch User */}
         {isLoginModalOpen && (
           <LoginModal

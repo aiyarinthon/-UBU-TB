@@ -23,13 +23,15 @@ import {
   Shield,
   Download,
   FileSpreadsheet,
-  Printer
+  Printer,
+  UploadCloud
 } from 'lucide-react';
 import { Patient, DailyLog, InvestigationForm, ContactPerson, UserProfile } from '../types';
 import { Permissions } from '../lib/userStore';
 import { PatientReportPdfModal } from './PatientReportPdfModal';
 import { ExportTablePdfModal } from './ExportTablePdfModal';
 import { exportPatientsToExcel } from '../lib/exportUtils';
+import { formatThaiDate, formatThaiDateTime } from '../lib/dateUtils';
 
 interface Props {
   patients: Patient[];
@@ -45,6 +47,7 @@ interface Props {
   onSearchChange: (val: string) => void;
   statusFilter: string;
   onStatusFilterChange: (val: string) => void;
+  onOpenImportModal?: (mode: 'patient' | 'contact') => void;
 }
 
 export const PatientList: React.FC<Props> = ({
@@ -61,6 +64,7 @@ export const PatientList: React.FC<Props> = ({
   onSearchChange,
   statusFilter,
   onStatusFilterChange,
+  onOpenImportModal,
 }) => {
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [pdfModalPatient, setPdfModalPatient] = useState<Patient | null>(null);
@@ -73,20 +77,7 @@ export const PatientList: React.FC<Props> = ({
 
   // Helper for formatting date
   const formatDateTime = (isoString?: string) => {
-    if (!isoString) return '-';
-    try {
-      const d = new Date(isoString);
-      if (isNaN(d.getTime())) return isoString;
-      return d.toLocaleDateString('th-TH', {
-        day: 'numeric',
-        month: 'short',
-        year: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return isoString;
-    }
+    return formatThaiDateTime(isoString);
   };
 
   // Filter patients
@@ -251,15 +242,28 @@ export const PatientList: React.FC<Props> = ({
           </div>
         </div>
 
-        {canAdd && (
-          <button
-            onClick={onOpenNewPatient}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            ลงทะเบียนผู้ป่วยรายใหม่
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onOpenImportModal && (
+            <button
+              onClick={() => onOpenImportModal('patient')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+              title="นำเข้าข้อมูลผู้ป่วยจาก Google Sheet"
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-teal-700" />
+              <span>นำเข้าจาก Sheet</span>
+            </button>
+          )}
+
+          {canAdd && (
+            <button
+              onClick={onOpenNewPatient}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>ลงทะเบียนผู้ป่วยรายใหม่</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Patient List Content */}
@@ -309,10 +313,12 @@ export const PatientList: React.FC<Props> = ({
                 {filteredPatients.map((patient) => {
                   const patientLogs = logs.filter(l => l.patientId === patient.id);
                   const todayLog = patientLogs.find(l => l.date === todayStr);
-                  const inv = investigations.find(i => i.patientId === patient.id || i.patientHN === patient.hn);
-                  const pContacts = contacts.filter(c => c.indexPatientId === patient.id || c.indexPatientHN === patient.hn);
-                  const householdC = patient.householdContactsCount || pContacts.filter(c => c.contactType === 'household').length;
-                  const nonHouseholdC = patient.nonHouseholdContactsCount || pContacts.filter(c => c.contactType === 'non_household').length;
+                  const inv = investigations.find(i => i.patientId === patient.id || (i.patientHN && patient.hn && i.patientHN.toLowerCase() === patient.hn.toLowerCase()));
+                  const pContacts = contacts.filter(c => c.indexPatientId === patient.id || (c.indexPatientHN && patient.hn && c.indexPatientHN.toLowerCase() === patient.hn.toLowerCase()));
+                  const regHousehold = pContacts.filter(c => c.contactType === 'household').length;
+                  const regNonHousehold = pContacts.filter(c => c.contactType === 'non_household').length;
+                  const householdC = regHousehold > 0 ? regHousehold : (inv ? inv.householdContactsCount : (patient.householdContactsCount || 0));
+                  const nonHouseholdC = regNonHousehold > 0 ? regNonHousehold : (inv ? inv.nonHouseholdContactsCount : (patient.nonHouseholdContactsCount || 0));
 
                   return (
                     <tr key={patient.id} className="hover:bg-teal-50/20 transition group">
@@ -469,8 +475,12 @@ export const PatientList: React.FC<Props> = ({
           {filteredPatients.map((patient) => {
             const patientLogs = logs.filter(l => l.patientId === patient.id);
             const todayLog = patientLogs.find(l => l.date === todayStr);
-            const inv = investigations.find(i => i.patientId === patient.id || i.patientHN === patient.hn);
-            const pContacts = contacts.filter(c => c.indexPatientId === patient.id || c.indexPatientHN === patient.hn);
+            const inv = investigations.find(i => i.patientId === patient.id || (i.patientHN && patient.hn && i.patientHN.toLowerCase() === patient.hn.toLowerCase()));
+            const pContacts = contacts.filter(c => c.indexPatientId === patient.id || (c.indexPatientHN && patient.hn && c.indexPatientHN.toLowerCase() === patient.hn.toLowerCase()));
+            const regHousehold = pContacts.filter(c => c.contactType === 'household').length;
+            const regNonHousehold = pContacts.filter(c => c.contactType === 'non_household').length;
+            const cardHouseholdC = regHousehold > 0 ? regHousehold : (inv ? inv.householdContactsCount : (patient.householdContactsCount || 0));
+            const cardNonHouseholdC = regNonHousehold > 0 ? regNonHousehold : (inv ? inv.nonHouseholdContactsCount : (patient.nonHouseholdContactsCount || 0));
 
             const hasSevereRecent = patientLogs.slice(0, 3).some(l => l.severityLevel === 'severe');
 
@@ -553,7 +563,7 @@ export const PatientList: React.FC<Props> = ({
                       <div className="truncate">
                         <div className="font-bold text-emerald-950">ผู้สัมผัส</div>
                         <div className="text-[10px] text-emerald-700 font-medium">
-                          ร่วม {patient.householdContactsCount || pContacts.filter(c => c.contactType === 'household').length} / นอก {patient.nonHouseholdContactsCount || pContacts.filter(c => c.contactType === 'non_household').length}
+                          ร่วม {cardHouseholdC} / นอก {cardNonHouseholdC}
                         </div>
                       </div>
                     </div>

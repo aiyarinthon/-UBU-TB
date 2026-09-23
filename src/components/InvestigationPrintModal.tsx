@@ -18,6 +18,7 @@ import {
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { Patient, InvestigationForm, ContactPerson } from '../types';
+import { formatThaiDate } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -175,7 +176,7 @@ export const InvestigationPrintModal: React.FC<Props> = ({
                 <div>รหัสการสอบสวน: <strong>{investigation.id}</strong></div>
               </div>
               <div className="text-right text-[11px] text-slate-600">
-                <div>วันที่สอบสวน: <strong>{new Date(investigation.investigationDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</strong></div>
+                <div>วันที่สอบสวน: <strong>{formatThaiDate(investigation.investigationDate)}</strong></div>
                 <div>HN ผู้ป่วย: <strong className="text-slate-900 text-xs font-mono">{patient.hn || '-'}</strong></div>
               </div>
             </div>
@@ -195,7 +196,7 @@ export const InvestigationPrintModal: React.FC<Props> = ({
           <div className="border border-slate-300 rounded-xl p-3.5 space-y-2">
             <div className="font-bold text-xs text-slate-900 bg-slate-100 px-2 py-1 rounded-sm flex items-center justify-between">
               <span>1. ข้อมูลทั่วไปของผู้ป่วย (Patient Demographics)</span>
-              <span className="text-[10px] font-normal text-slate-600">วันขึ้นทะเบียน NTIP: {patient.ntipRegistrationDate ? new Date(patient.ntipRegistrationDate).toLocaleDateString('th-TH') : '-'}</span>
+              <span className="text-[10px] font-normal text-slate-600">วันขึ้นทะเบียน NTIP: {patient.ntipRegistrationDate ? formatThaiDate(patient.ntipRegistrationDate) : '-'}</span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
@@ -217,10 +218,10 @@ export const InvestigationPrintModal: React.FC<Props> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] pt-1">
               <div>
-                <strong>วันที่เริ่มมีอาการ (Onset):</strong> {investigation.symptomOnsetDate ? new Date(investigation.symptomOnsetDate).toLocaleDateString('th-TH') : (patient.diagnosisDate ? new Date(patient.diagnosisDate).toLocaleDateString('th-TH') : '-')}
+                <strong>วันที่เริ่มมีอาการ (Onset):</strong> {investigation.symptomOnsetDate ? formatThaiDate(investigation.symptomOnsetDate) : (patient.diagnosisDate ? formatThaiDate(patient.diagnosisDate) : '-')}
               </div>
               <div>
-                <strong>วันที่ตรวจพบ/วินิจฉัย:</strong> {patient.diagnosisDate ? new Date(patient.diagnosisDate).toLocaleDateString('th-TH') : '-'}
+                <strong>วันที่ตรวจพบ/วินิจฉัย:</strong> {patient.diagnosisDate ? formatThaiDate(patient.diagnosisDate) : '-'}
               </div>
               <div>
                 <strong>กลุ่มการรักษา:</strong> {patient.treatmentCategory || 'ผู้ป่วยรายใหม่ (Cat 1)'}
@@ -231,7 +232,7 @@ export const InvestigationPrintModal: React.FC<Props> = ({
             <div className="p-2 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-[11px] leading-relaxed">
               <strong className="text-slate-900">⏱️ ช่วงเวลาแพร่กระจายเชื้อของผู้ป่วย (Infectious Period):</strong>{' '}
               <span>
-                ตั้งแต่ <strong>{defaultInfectiousStart ? new Date(defaultInfectiousStart).toLocaleDateString('th-TH') : '-'}</strong> ถึง <strong>{defaultInfectiousEnd ? new Date(defaultInfectiousEnd).toLocaleDateString('th-TH') : '-'}</strong>{' '}
+                ตั้งแต่ <strong>{defaultInfectiousStart ? formatThaiDate(defaultInfectiousStart) : '-'}</strong> ถึง <strong>{defaultInfectiousEnd ? formatThaiDate(defaultInfectiousEnd) : '-'}</strong>{' '}
                 <span className="text-slate-500">(คำนวณย้อนหลัง 3 เดือนก่อนเริ่มมีอาการ จนถึงหลังรับประทานยาต้านวัณโรค 2 สัปดาห์)</span>
               </span>
             </div>
@@ -267,7 +268,7 @@ export const InvestigationPrintModal: React.FC<Props> = ({
 
               <div className="space-y-1">
                 <div><strong>ผลตรวจภาพรังสีทรวงอก (CXR แรกรับ):</strong> {investigation.initialCxrResult || 'Infiltration / Cavitary lesion'}</div>
-                <div><strong>วันที่ตรวจ CXR:</strong> {investigation.initialCxrDate ? new Date(investigation.initialCxrDate).toLocaleDateString('th-TH') : '-'}</div>
+                <div><strong>วันที่ตรวจ CXR:</strong> {investigation.initialCxrDate ? formatThaiDate(investigation.initialCxrDate) : '-'}</div>
               </div>
             </div>
           </div>
@@ -404,7 +405,7 @@ export const InvestigationPrintModal: React.FC<Props> = ({
               <div className="space-y-1">
                 <div>(<strong>{investigation.investigatorName || '..........................................................'}</strong>)</div>
                 <div className="text-slate-600">ตำแหน่ง: {investigation.investigatorPosition || 'พยาบาลวิชาชีพ / เจ้าหน้าที่สอบสวนโรค'}</div>
-                <div className="text-slate-600">วันที่: {new Date(investigation.investigationDate).toLocaleDateString('th-TH')}</div>
+                <div className="text-slate-600">วันที่: {formatThaiDate(investigation.investigationDate)}</div>
               </div>
             </div>
           </div>

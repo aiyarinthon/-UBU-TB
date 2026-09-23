@@ -21,6 +21,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { Patient, DailyLog, ContactPerson, ContactFollowUp, UserProfile } from '../types';
+import { formatThaiDate, formatThaiDateTime } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -171,7 +172,7 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
 3. อัตราการติดตามกลุ่มเสี่ยงตรวจคัดกรองเอกเรย์ปอด: ${cxrCoveragePct}% (${contactsWithCxr.length}/${totalContacts} คน, เป้าหมาย > 85%) -> ${isCxrCoveragePass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
 
 ผู้รายงาน: ${currentUserProfile?.displayName || 'นางสาวไอญารินธร อุ้มบุญ'} (${currentUserProfile?.position || 'นักวิชาการสาธารณสุข'})
-วันที่ออกรายงาน: ${new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}`;
+วันที่ออกรายงาน: ${formatThaiDate(new Date(), { short: false })}`;
 
     try {
       await navigator.clipboard.writeText(summaryText);
@@ -309,7 +310,7 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
 
             <div className="text-left sm:text-right text-xs space-y-1 bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-xl border sm:border-0 border-slate-200">
               <div><strong>ช่วงเวลาที่ประเมิน:</strong> <span className="text-teal-900 font-semibold">{getPeriodLabel()}</span></div>
-              <div><strong>วันที่จัดทำรายงาน:</strong> {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} น.</div>
+              <div><strong>วันที่จัดทำรายงาน:</strong> {formatThaiDateTime(new Date())}</div>
               <div><strong>ผู้จัดทำ:</strong> {currentUserProfile?.displayName || 'นางสาวไอญารินธร อุ้มบุญ'} ({currentUserProfile?.position || 'นักวิชาการสาธารณสุข'})</div>
             </div>
           </div>

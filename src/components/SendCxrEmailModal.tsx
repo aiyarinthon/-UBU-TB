@@ -16,6 +16,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { ContactPerson, ContactFollowUp } from '../types';
+import { formatThaiDate } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -99,23 +100,11 @@ export const SendCxrEmailModal: React.FC<Props> = ({
     }
   };
 
-  // Helper to format date in Thai
-  const formatThaiDate = (dateStr?: string) => {
-    if (!dateStr) return '-';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-    } catch {
-      return dateStr;
-    }
-  };
-
   // Generate Formal Thai Email Body
   const emailSubject = `[แจ้งผลตรวจเอกซเรย์ปอด CXR] รพ.มหาวิทยาลัยอุบลราชธานี - คุณ${recipientName}`;
 
-  const formattedCxrDate = formatThaiDate(cxrDate);
-  const formattedNextAppointment = formatThaiDate(nextAppointment);
+  const formattedCxrDate = formatThaiDate(cxrDate, { short: false });
+  const formattedNextAppointment = formatThaiDate(nextAppointment, { short: false });
 
   const emailBody = `เรียน คุณ${recipientName}
 

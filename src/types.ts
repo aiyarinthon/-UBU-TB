@@ -104,7 +104,11 @@ export interface ContactPerson {
   email: string; // e-mail
   protocolType: 'cxr_4_times' | 'igra_tpt'; // เกณฑ์: อายุ > 5 ปี (CXR 4 ครั้ง ห่างกัน 6 ด.) vs อายุ <= 5 ปี (IGRA / TPT)
   ntipStatus: 'entered' | 'not_entered'; // ข้อมูลการคีย์ n-tip
-  ntipKeyCode: string; // รหัสที่คีย์ใน n-tip (NTIP Key Code)
+  ntipKeyCode: string; // รหัสที่คีย์ใน n-tip (NTIP Key Code ล่าสุด/หลัก)
+  ntipCodeRound1?: string; // รหัส N-tip CXR ครั้งที่ 1 (0 เดือน / แรกรับ)
+  ntipCodeRound2?: string; // รหัส N-tip CXR ครั้งที่ 2 (6 เดือน)
+  ntipCodeRound3?: string; // รหัส N-tip CXR ครั้งที่ 3 (12 เดือน)
+  ntipCodeRound4?: string; // รหัส N-tip CXR ครั้งที่ 4 (18 เดือน)
   ntipKeyDate?: string; // วันที่คีย์ n-tip
   ntipNotes?: string; // หมายเหตุการคีย์ N-tip
   
@@ -152,7 +156,11 @@ export interface ContactFollowUp {
   resultDetail?: string; // รายละเอียดผลตรวจ เช่น ฟิล์มปอดปกติ / ผล IGRA 0.45 IU/ml
   tptRegimen?: '3HP' | '1HP' | '6H' | 'none' | 'refused'; // สูตรยาป้องกันวัณโรค
   hospitalOrFacility?: string; // สถานพยาบาลที่ตรวจ
-  ntipKeyCode?: string; // รหัสที่คีย์ใน n-tip
+  ntipKeyCode?: string; // รหัสที่คีย์ใน n-tip (สำหรับรอบนี้ / รหัสหลัก)
+  ntipCodeRound1?: string; // รหัส N-tip CXR ครั้งที่ 1 (0 เดือน / แรกรับ)
+  ntipCodeRound2?: string; // รหัส N-tip CXR ครั้งที่ 2 (6 เดือน)
+  ntipCodeRound3?: string; // รหัส N-tip CXR ครั้งที่ 3 (12 เดือน)
+  ntipCodeRound4?: string; // รหัส N-tip CXR ครั้งที่ 4 (18 เดือน)
   ntipNotes?: string; // หมายเหตุการคีย์ N-tip
   nextAppointmentDate?: string; // วันนัดตรวจครั้งถัดไป
   recordedBy: string;

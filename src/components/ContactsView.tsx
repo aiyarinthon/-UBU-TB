@@ -26,13 +26,15 @@ import {
   Printer,
   Download,
   Send,
-  Trash2
+  Trash2,
+  UploadCloud
 } from 'lucide-react';
 import { ContactPerson, ContactFollowUp, Patient, UserProfile } from '../types';
 import { ContactCriteriaModal } from './ContactCriteriaModal';
 import { SendCxrEmailModal } from './SendCxrEmailModal';
 import { ExportTablePdfModal } from './ExportTablePdfModal';
 import { exportContactsToExcel } from '../lib/exportUtils';
+import { formatThaiDate, formatThaiDateTime } from '../lib/dateUtils';
 
 interface Props {
   contacts: ContactPerson[];
@@ -44,6 +46,7 @@ interface Props {
   onOpenFollowUpModal: (contact: ContactPerson, defaultStep?: ContactFollowUp['stepType']) => void;
   onDeleteContact?: (contactId: string) => void;
   spreadsheetUrl?: string | null;
+  onOpenImportModal?: (mode: 'patient' | 'contact') => void;
 }
 
 export const ContactsView: React.FC<Props> = ({
@@ -56,6 +59,7 @@ export const ContactsView: React.FC<Props> = ({
   onOpenFollowUpModal,
   onDeleteContact,
   spreadsheetUrl,
+  onOpenImportModal,
 }) => {
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
   const [searchTerm, setSearchTerm] = useState('');
@@ -68,22 +72,9 @@ export const ContactsView: React.FC<Props> = ({
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [contactToDelete, setContactToDelete] = useState<ContactPerson | null>(null);
 
-  // Helper for formatting date
+  // Helper for formatting date in Thai Buddhist Era (พ.ศ.)
   const formatDateTime = (isoString?: string) => {
-    if (!isoString) return '-';
-    try {
-      const d = new Date(isoString);
-      if (isNaN(d.getTime())) return isoString;
-      return d.toLocaleDateString('th-TH', {
-        day: 'numeric',
-        month: 'short',
-        year: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return isoString;
-    }
+    return formatThaiDateTime(isoString);
   };
 
   // Statistics
@@ -189,6 +180,17 @@ export const ContactsView: React.FC<Props> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {onOpenImportModal && (
+            <button
+              onClick={() => onOpenImportModal('contact')}
+              className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl border border-white/20 transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="นำเข้าข้อมูลกลุ่มเสี่ยง/ผู้สัมผัสจาก Google Sheet"
+            >
+              <UploadCloud className="w-4 h-4 text-emerald-300" />
+              <span>นำเข้าจาก Sheet</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowCriteriaModal(true)}
             className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl border border-white/20 transition flex items-center gap-1.5 cursor-pointer"
@@ -415,7 +417,7 @@ export const ContactsView: React.FC<Props> = ({
                                     contact.cxrResult === 'abnormal_other' ? 'ผิดปกติอื่นๆ' : 'รอผล'}
                             </span>
                             {contact.cxrDate && (
-                              <span className="text-[10px] text-slate-400">({contact.cxrDate})</span>
+                              <span className="text-[10px] text-slate-400">({formatThaiDate(contact.cxrDate, { short: true })})</span>
                             )}
                           </div>
                         ) : null}
@@ -423,7 +425,7 @@ export const ContactsView: React.FC<Props> = ({
                         {contact.nextCxrDate && (
                           <div className="text-[10px] text-teal-700 font-semibold mt-0.5 flex items-center gap-1">
                             <Clock className="w-3 h-3 text-teal-600" />
-                            <span>นัดครั้งถัดไป: {contact.nextCxrDate}</span>
+                            <span>นัดครั้งถัดไป: {formatThaiDate(contact.nextCxrDate, { short: true })}</span>
                           </div>
                         )}
 
@@ -432,14 +434,35 @@ export const ContactsView: React.FC<Props> = ({
                         </div>
                       </td>
 
-                      {/* n-tip Status */}
-                      <td className="py-3 px-4 max-w-[180px]">
-                        {contact.ntipStatus === 'entered' ? (
-                          <div>
-                            <span className="inline-flex items-center gap-1 font-mono font-bold text-[10px] bg-purple-100 text-purple-900 px-2 py-0.5 rounded-lg border border-purple-200">
-                              <CheckCircle2 className="w-3 h-3 text-purple-700" />
-                              {contact.ntipKeyCode ? `รหัส ${contact.ntipKeyCode}` : 'คีย์แล้ว'}
-                            </span>
+                      {/* n-tip Status & 4-round codes */}
+                      <td className="py-3 px-4 max-w-[240px]">
+                        {contact.ntipStatus === 'entered' || contact.ntipCodeRound1 || contact.ntipCodeRound2 || contact.ntipCodeRound3 || contact.ntipCodeRound4 ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center gap-1 font-mono font-bold text-[10px] bg-purple-100 text-purple-900 px-2 py-0.5 rounded-lg border border-purple-200">
+                                <CheckCircle2 className="w-3 h-3 text-purple-700" />
+                                {contact.ntipKeyCode ? `N-tip: ${contact.ntipKeyCode}` : 'คีย์ N-tip แล้ว'}
+                              </span>
+                            </div>
+
+                            {/* 4 Rounds breakdown */}
+                            {(contact.ntipCodeRound1 || contact.ntipCodeRound2 || contact.ntipCodeRound3 || contact.ntipCodeRound4) && (
+                              <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
+                                <span className={`px-1.5 py-0.5 rounded border ${contact.ntipCodeRound1 ? 'bg-purple-50 border-purple-200 text-purple-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                                  1(0M): {contact.ntipCodeRound1 || '-'}
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded border ${contact.ntipCodeRound2 ? 'bg-purple-50 border-purple-200 text-purple-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                                  2(6M): {contact.ntipCodeRound2 || '-'}
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded border ${contact.ntipCodeRound3 ? 'bg-purple-50 border-purple-200 text-purple-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                                  3(12M): {contact.ntipCodeRound3 || '-'}
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded border ${contact.ntipCodeRound4 ? 'bg-purple-50 border-purple-200 text-purple-900 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                                  4(18M): {contact.ntipCodeRound4 || '-'}
+                                </span>
+                              </div>
+                            )}
+
                             {contact.ntipNotes && (
                               <div className="text-[10px] text-purple-900 bg-purple-50/80 p-1 rounded-md border border-purple-100 mt-1 line-clamp-2" title={contact.ntipNotes}>
                                 <strong>หมายเหตุ:</strong> {contact.ntipNotes}
@@ -732,7 +755,7 @@ export const ContactsView: React.FC<Props> = ({
                     <div className="flex items-center justify-between text-[10px] text-emerald-800/80 pt-0.5">
                       <span>สถานพยาบาล: {contact.cxrHospital || 'รพ.มหาวิทยาลัยอุบลราชธานี'}</span>
                       {contact.nextCxrDate && (
-                        <span className="font-bold text-teal-800">นัดถัดไป: {contact.nextCxrDate}</span>
+                        <span className="font-bold text-teal-800">นัดถัดไป: {formatThaiDate(contact.nextCxrDate, { short: true })}</span>
                       )}
                     </div>
                   </div>
@@ -749,16 +772,16 @@ export const ContactsView: React.FC<Props> = ({
                   </span>
                 </div>
 
-                {/* NTIP Code Footer Badge with Notes */}
+                {/* NTIP Code Footer Badge with 4-round codes and Notes */}
                 <div className="pt-2 border-t border-slate-100 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <FileKey className="w-3.5 h-3.5 text-purple-700" />
-                      <span className="text-slate-500 text-[11px]">การคีย์ใน n-tip:</span>
-                      {contact.ntipStatus === 'entered' ? (
+                      <span className="text-slate-500 text-[11px]">การคีย์ใน N-tip:</span>
+                      {contact.ntipStatus === 'entered' || contact.ntipCodeRound1 || contact.ntipCodeRound2 || contact.ntipCodeRound3 || contact.ntipCodeRound4 ? (
                         <span className="inline-flex items-center gap-1 font-mono font-bold text-[11px] bg-purple-100 text-purple-900 px-2 py-0.5 rounded-lg border border-purple-200">
                           <CheckCircle2 className="w-3 h-3 text-purple-700" />
-                          รหัส {contact.ntipKeyCode || 'คีย์แล้ว'}
+                          {contact.ntipKeyCode ? `รหัส ${contact.ntipKeyCode}` : 'คีย์แล้ว'}
                         </span>
                       ) : (
                         <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-lg">
@@ -776,9 +799,31 @@ export const ContactsView: React.FC<Props> = ({
                     </button>
                   </div>
 
+                  {/* 4 Rounds breakdown in Card */}
+                  {(contact.ntipCodeRound1 || contact.ntipCodeRound2 || contact.ntipCodeRound3 || contact.ntipCodeRound4) && (
+                    <div className="grid grid-cols-2 gap-1 text-[10px] font-mono pt-0.5">
+                      <div className={`p-1 rounded-lg border flex justify-between items-center ${contact.ntipCodeRound1 ? 'bg-purple-50/70 border-purple-200 text-purple-950 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                        <span>ครั้ง 1 (0M):</span>
+                        <span>{contact.ntipCodeRound1 || '-'}</span>
+                      </div>
+                      <div className={`p-1 rounded-lg border flex justify-between items-center ${contact.ntipCodeRound2 ? 'bg-purple-50/70 border-purple-200 text-purple-950 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                        <span>ครั้ง 2 (6M):</span>
+                        <span>{contact.ntipCodeRound2 || '-'}</span>
+                      </div>
+                      <div className={`p-1 rounded-lg border flex justify-between items-center ${contact.ntipCodeRound3 ? 'bg-purple-50/70 border-purple-200 text-purple-950 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                        <span>ครั้ง 3 (12M):</span>
+                        <span>{contact.ntipCodeRound3 || '-'}</span>
+                      </div>
+                      <div className={`p-1 rounded-lg border flex justify-between items-center ${contact.ntipCodeRound4 ? 'bg-purple-50/70 border-purple-200 text-purple-950 font-bold' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+                        <span>ครั้ง 4 (18M):</span>
+                        <span>{contact.ntipCodeRound4 || '-'}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {contact.ntipNotes && (
                     <div className="p-2 bg-purple-50/70 border border-purple-100 rounded-xl text-[11px] text-purple-950 flex items-start gap-1.5">
-                      <strong className="flex-shrink-0 text-purple-800">หมายเหตุ n-tip:</strong>
+                      <strong className="flex-shrink-0 text-purple-800">หมายเหตุ N-tip:</strong>
                       <span>{contact.ntipNotes}</span>
                     </div>
                   )}
@@ -838,7 +883,7 @@ export const ContactsView: React.FC<Props> = ({
                         </div>
 
                         <div className="text-slate-600">
-                          วันที่นัด: <strong>{fu.scheduledDate}</strong> {fu.actualDate && `• ตรวจจริง: ${fu.actualDate}`}
+                          วันที่นัด: <strong>{formatThaiDate(fu.scheduledDate)}</strong> {fu.actualDate && `• ตรวจจริง: ${formatThaiDate(fu.actualDate)}`}
                         </div>
 
                         {fu.testResult && (

@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Printer, Download, X, FileSpreadsheet, Users, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { Patient, ContactPerson, ContactFollowUp } from '../types';
+import { formatThaiDate, formatThaiDateTime } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -24,13 +25,7 @@ export const ExportTablePdfModal: React.FC<Props> = ({
   const printContainerRef = useRef<HTMLDivElement>(null);
   if (!isOpen) return null;
 
-  const printDateStr = new Date().toLocaleDateString('th-TH', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const printDateStr = formatThaiDateTime(new Date());
 
   const handlePrint = () => {
     window.print();
@@ -185,7 +180,7 @@ export const ExportTablePdfModal: React.FC<Props> = ({
                         <td className="py-2 px-2 text-slate-800">
                           <span className="font-mono font-bold">{p.regimen}</span>
                           {p.treatmentStartDate && (
-                            <div className="text-[10px] text-slate-500">{p.treatmentStartDate}</div>
+                            <div className="text-[10px] text-slate-500">{formatThaiDate(p.treatmentStartDate)}</div>
                           )}
                         </td>
                         <td className="py-2 px-2 text-slate-700 font-medium">{p.sputumResult || '-'}</td>
@@ -254,7 +249,7 @@ export const ExportTablePdfModal: React.FC<Props> = ({
                              c.cxrResult === 'abnormal_suspect_tb' ? 'สงสัยวัณโรค' :
                              c.cxrResult === 'abnormal_other' ? 'ผิดปกติอื่นๆ' : 'รอผล'}
                           </span>
-                          {c.cxrDate && <div className="text-[10px] text-slate-400">{c.cxrDate}</div>}
+                          {c.cxrDate && <div className="text-[10px] text-slate-400">{formatThaiDate(c.cxrDate)}</div>}
                         </td>
                         <td className="py-2 px-2 text-center font-mono">
                           {c.ntipStatus === 'entered' ? (
@@ -266,7 +261,7 @@ export const ExportTablePdfModal: React.FC<Props> = ({
                           )}
                         </td>
                         <td className="py-2 px-2 text-slate-700 font-mono text-[10px]">
-                          {c.nextCxrDate || '-'}
+                          {c.nextCxrDate ? formatThaiDate(c.nextCxrDate) : '-'}
                         </td>
                       </tr>
                     ))}
