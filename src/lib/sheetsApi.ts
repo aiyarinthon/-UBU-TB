@@ -1,15 +1,56 @@
-import { Patient, InvestigationForm, ContactPerson, ContactFollowUp, DailyLog } from '../types';
+import { Patient, InvestigationForm, ContactPerson, ContactFollowUp, DailyLog, HealthcareWorker, HcwCxrRecord } from '../types';
+import { normalizePatientStatus } from './patientUtils';
 
 export const PATIENTS_SHEET_NAME = 'ผู้ป่วยวัณโรครายใหม่ (Patients)';
 export const INVESTIGATION_SHEET_NAME = 'การสอบสวนโรค (Investigation)';
 export const CONTACTS_SHEET_NAME = 'กลุ่มผู้สัมผัสโรค (Contacts)';
 export const FOLLOW_UPS_SHEET_NAME = 'บันทึกการติดตามตรวจ (Follow-ups)';
 export const DAILY_LOGS_SHEET_NAME = 'บันทึกอาการและยา (Daily Logs)';
+export const HEALTHCARE_WORKERS_SHEET_NAME = 'บุคลากรทางการแพทย์ (Healthcare Workers)';
 
 export function formatRange(sheetName: string, cellRange?: string): string {
   const fullRange = cellRange ? `'${sheetName}'!${cellRange}` : `'${sheetName}'`;
   return encodeURIComponent(fullRange);
 }
+
+export const HCW_HEADERS = [
+  'รหัสบุคลากร (ID)',
+  'รหัสพนักงาน (Staff ID)',
+  'HN',
+  'ชื่อ-นามสกุล',
+  'เพศ',
+  'อายุ',
+  'เบอร์ติดต่อ',
+  'Email',
+  'แผนก/ฝ่าย',
+  'ตำแหน่ง/วิชาชีพ',
+  'ประเภทการจ้างงาน',
+  'วันที่เริ่มงาน',
+  'สถานที่ปฏิบัติงาน/อาคาร',
+  'สถานะการทำงาน (Status)',
+  'วันที่ลาออก/พ้นสภาพ',
+  'เหตุผลการพ้นสภาพ',
+  'หมายเหตุการลาออก',
+  'ระดับความเสี่ยง TB',
+  'ประวัติสัมผัสผู้ป่วย TB ในงาน',
+  'รายละเอียดการสัมผัส',
+  'ประวัติเคยป่วยเป็น TB',
+  'คัดกรองอาการสงสัย (Symptoms)',
+  'การตรวจการติดเชื้อแฝง (IGRA/TST)',
+  'ผลตรวจการติดเชื้อแฝง',
+  'สถานะการรับยาป้องกัน (TPT)',
+  'สูตรยาป้องกัน TPT',
+  'จำนวนครั้งตรวจ CXR ทั้งหมด',
+  'ประวัติการตรวจ CXR ทั้งหมด (JSON)',
+  'วันที่ตรวจ CXR ล่าสุด',
+  'ผล CXR ล่าสุด',
+  'รายละเอียดผลอ่านฟิล์มล่าสุด',
+  'วันนัดตรวจ CXR รอบถัดไป',
+  'หมายเหตุเพิ่มเติม',
+  'วันที่บันทึก (Created At)',
+  'วันที่แก้ไขล่าสุด (Updated At)',
+  'แก้ไขล่าสุดโดย (Last Updated By)'
+];
 
 export const PATIENT_HEADERS = [
   'รหัสผู้ป่วย (ID)',
@@ -224,6 +265,13 @@ export async function createTBSheet(accessToken: string, customTitle?: string): 
             tabColor: { red: 0.1, green: 0.7, blue: 0.3 },
           },
         },
+        {
+          properties: {
+            title: HEALTHCARE_WORKERS_SHEET_NAME,
+            gridProperties: { frozenRowCount: 1 },
+            tabColor: { red: 0.1, green: 0.6, blue: 0.6 },
+          },
+        },
       ],
     }),
   });
@@ -266,6 +314,10 @@ export async function createTBSheet(accessToken: string, customTitle?: string): 
         {
           range: `'${DAILY_LOGS_SHEET_NAME}'!A1:Y1`,
           values: [DAILY_LOG_HEADERS],
+        },
+        {
+          range: `'${HEALTHCARE_WORKERS_SHEET_NAME}'!A1:AJ1`,
+          values: [HCW_HEADERS],
         },
       ],
     }),
@@ -353,6 +405,14 @@ export async function verifyAndInitSheets(accessToken: string, spreadsheetId: st
       color: { red: 0.1, green: 0.7, blue: 0.3 },
       headers: DAILY_LOG_HEADERS,
       range: `'${DAILY_LOGS_SHEET_NAME}'!A1:Y1`,
+    });
+  }
+  if (!existingSheets.includes(HEALTHCARE_WORKERS_SHEET_NAME)) {
+    missingSheets.push({
+      title: HEALTHCARE_WORKERS_SHEET_NAME,
+      color: { red: 0.1, green: 0.6, blue: 0.6 },
+      headers: HCW_HEADERS,
+      range: `'${HEALTHCARE_WORKERS_SHEET_NAME}'!A1:AJ1`,
     });
   }
 
@@ -475,7 +535,7 @@ export async function fetchAllPatients(accessToken: string, spreadsheetId: strin
       householdContactsCount: Number(row[19]) || 0,
       nonHouseholdContactsCount: Number(row[20]) || 0,
       investigationStatus: (row[21] as any) || 'pending',
-      status: (row[22] as any) || 'active',
+      status: normalizePatientStatus(row[22]),
       notes: row[23] || '',
       createdAt: row[24] || new Date().toISOString(),
       lastUpdatedBy: row[25] || '',
@@ -574,6 +634,8 @@ export async function appendPatientToSheet(accessToken: string, spreadsheetId: s
     throw new Error(err.error?.message || 'ไม่สามารถบันทึกข้อมูลผู้ป่วยลงใน Google Sheet ได้');
   }
 }
+
+export const savePatientToSheet = appendPatientToSheet;
 
 export async function updatePatientInSheet(accessToken: string, spreadsheetId: string, patient: Patient): Promise<void> {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(PATIENTS_SHEET_NAME, 'A:J')}`;
@@ -1260,6 +1322,246 @@ export async function deleteContactFromSheet(accessToken: string, spreadsheetId:
   }
 }
 
+// ==========================================
+// HEALTHCARE WORKERS (บุคลากรทางการแพทย์)
+// ==========================================
+
+export async function fetchAllHealthcareWorkers(
+  accessToken: string,
+  spreadsheetId: string
+): Promise<HealthcareWorker[]> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(HEALTHCARE_WORKERS_SHEET_NAME, 'A2:AJ')}`;
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+
+  if (!res.ok) {
+    await verifyAndInitSheets(accessToken, spreadsheetId);
+    res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return [];
+  }
+
+  const data = await res.json().catch(() => ({}));
+  const rows: string[][] = data.values || [];
+
+  return rows.map((row, idx) => {
+    const rawId = (row[0] || '').trim();
+    const rawStaffId = (row[1] || '').trim();
+    const rawHn = (row[2] || '').trim();
+    const rawName = (row[3] || '').trim();
+
+    if (!rawName && !rawId) return null;
+    if (rawName === 'ชื่อ-นามสกุล' || rawId.includes('รหัสบุคลากร')) return null;
+
+    const workerId = rawId || (rawStaffId ? `HCW-${rawStaffId}` : `HCW-${Date.now()}-${idx + 1}`);
+
+    // Parse JSON CXR records if stored, else fallback
+    let cxrRecords: HcwCxrRecord[] = [];
+    if (row[27]) {
+      try {
+        cxrRecords = JSON.parse(row[27]);
+      } catch (e) {
+        cxrRecords = [];
+      }
+    }
+
+    // Parse symptoms
+    let symptoms = {
+      chronicCough: false,
+      coughDurationWeeks: 0,
+      coughBlood: false,
+      fever: false,
+      nightSweats: false,
+      weightLoss: false,
+      chestPain: false,
+      fatigue: false,
+    };
+    if (row[21]) {
+      try {
+        symptoms = JSON.parse(row[21]);
+      } catch (e) {
+        // fallback
+      }
+    }
+
+    const worker: HealthcareWorker = {
+      id: workerId,
+      staffId: rawStaffId || undefined,
+      hn: rawHn || undefined,
+      fullName: rawName || 'บุคลากรทางการแพทย์',
+      gender: (row[4] === 'หญิง' || row[4] === 'female' ? 'female' : row[4] === 'อื่นๆ' ? 'other' : 'male'),
+      age: Number(row[5]) || 30,
+      phone: row[6] || '',
+      email: row[7] || undefined,
+      department: row[8] || 'แผนกอายุรกรรม',
+      position: row[9] || 'พยาบาลวิชาชีพ',
+      employmentType: (row[10] as any) || 'permanent',
+      startDate: row[11] || undefined,
+      workLocation: row[12] || undefined,
+      status: (row[13] as any) || 'active',
+      resignationDate: row[14] || undefined,
+      resignationReason: row[15] || undefined,
+      resignationNotes: row[16] || undefined,
+      riskLevel: (row[17] as any) || 'medium',
+      exposureHistory: row[18] === 'เคย' || row[18] === 'true',
+      exposureDetails: row[19] || undefined,
+      pastTbHistory: row[20] === 'เคย' || row[20] === 'true',
+      symptoms,
+      latentTbTestType: (row[22] as any) || 'none',
+      latentTbTestResult: (row[23] as any) || undefined,
+      tptStatus: (row[24] as any) || 'not_indicated',
+      tptRegimen: (row[25] as any) || undefined,
+      cxrRecords,
+      notes: row[32] || undefined,
+      createdAt: row[33] || new Date().toISOString(),
+      updatedAt: row[34] || new Date().toISOString(),
+      lastUpdatedBy: row[35] || undefined,
+    };
+
+    return worker;
+  }).filter((w): w is HealthcareWorker => w !== null);
+}
+
+export async function saveHealthcareWorkerToSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  worker: HealthcareWorker
+): Promise<void> {
+  const genderLabel = worker.gender === 'female' ? 'หญิง' : worker.gender === 'other' ? 'อื่นๆ' : 'ชาย';
+  const records = worker.cxrRecords || [];
+  const latestCxr = records.length > 0 
+    ? [...records].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] 
+    : null;
+
+  const rowValues = [
+    worker.id,
+    worker.staffId || '',
+    worker.hn || '',
+    worker.fullName,
+    genderLabel,
+    worker.age,
+    worker.phone,
+    worker.email || '',
+    worker.department,
+    worker.position,
+    worker.employmentType,
+    worker.startDate || '',
+    worker.workLocation || '',
+    worker.status,
+    worker.resignationDate || '',
+    worker.resignationReason || '',
+    worker.resignationNotes || '',
+    worker.riskLevel,
+    worker.exposureHistory ? 'เคย' : 'ไม่เคย',
+    worker.exposureDetails || '',
+    worker.pastTbHistory ? 'เคย' : 'ไม่เคย',
+    JSON.stringify(worker.symptoms || {}),
+    worker.latentTbTestType || 'none',
+    worker.latentTbTestResult || '',
+    worker.tptStatus || 'not_indicated',
+    worker.tptRegimen || '',
+    records.length,
+    JSON.stringify(records),
+    latestCxr?.date || '',
+    latestCxr?.result || '',
+    latestCxr?.resultDetail || '',
+    latestCxr?.nextScheduledDate || '',
+    worker.notes || '',
+    worker.createdAt || new Date().toISOString(),
+    worker.updatedAt || new Date().toISOString(),
+    worker.lastUpdatedBy || '',
+  ];
+
+  // Find existing row by ID or StaffID
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(HEALTHCARE_WORKERS_SHEET_NAME, 'A:D')}`;
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+
+  if (!res.ok) {
+    await verifyAndInitSheets(accessToken, spreadsheetId);
+    res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  }
+
+  const data = await res.json().catch(() => ({}));
+  const rows: string[][] = data.values || [];
+  const targetId = (worker.id || '').trim();
+  const targetStaffId = (worker.staffId || '').trim();
+
+  let existingRowIdx = -1;
+  for (let i = 1; i < rows.length; i++) {
+    const rowId = (rows[i][0] || '').trim();
+    const rowStaffId = (rows[i][1] || '').trim();
+    if ((targetId && rowId === targetId) || (targetStaffId && rowStaffId === targetStaffId)) {
+      existingRowIdx = i + 1;
+      break;
+    }
+  }
+
+  if (existingRowIdx !== -1) {
+    // Update existing row
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(HEALTHCARE_WORKERS_SHEET_NAME, `A${existingRowIdx}:AJ${existingRowIdx}`)}?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: [rowValues] }),
+      }
+    );
+  } else {
+    // Append new row
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(HEALTHCARE_WORKERS_SHEET_NAME, 'A:AJ')}:append?valueInputOption=USER_ENTERED`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: [rowValues] }),
+      }
+    );
+  }
+}
+
+export async function deleteHealthcareWorkerFromSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  workerId: string
+): Promise<void> {
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(HEALTHCARE_WORKERS_SHEET_NAME, 'A:A')}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return;
+
+    const data = await res.json().catch(() => ({}));
+    const rows: string[][] = data.values || [];
+    const targetId = workerId.trim();
+
+    let targetRow = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if ((rows[i][0] || '').trim() === targetId) {
+        targetRow = i + 1;
+        break;
+      }
+    }
+
+    if (targetRow !== -1) {
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${formatRange(HEALTHCARE_WORKERS_SHEET_NAME, `A${targetRow}:AJ${targetRow}`)}:clear`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+    }
+  } catch (err) {
+    console.error('Error deleting healthcare worker from sheet:', err);
+  }
+}
+
 export async function pushAllLocalDataToSheet(
   accessToken: string,
   spreadsheetId: string,
@@ -1269,6 +1571,7 @@ export async function pushAllLocalDataToSheet(
     contacts: ContactPerson[];
     followUps: ContactFollowUp[];
     logs: DailyLog[];
+    healthcareWorkers?: HealthcareWorker[];
   }
 ): Promise<{ success: boolean; count: number }> {
   await verifyAndInitSheets(accessToken, spreadsheetId);
@@ -1491,6 +1794,58 @@ export async function pushAllLocalDataToSheet(
     });
   }
 
+  const hcwRows = (data.healthcareWorkers || []).map(w => {
+    const records = w.cxrRecords || [];
+    const latest = records.length > 0 
+      ? [...records].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0] 
+      : null;
+    return [
+      w.id,
+      w.staffId || '',
+      w.hn || '',
+      w.fullName,
+      w.gender === 'female' ? 'หญิง' : w.gender === 'other' ? 'อื่นๆ' : 'ชาย',
+      w.age,
+      w.phone,
+      w.email || '',
+      w.department,
+      w.position,
+      w.employmentType,
+      w.startDate || '',
+      w.workLocation || '',
+      w.status,
+      w.resignationDate || '',
+      w.resignationReason || '',
+      w.resignationNotes || '',
+      w.riskLevel,
+      w.exposureHistory ? 'เคย' : 'ไม่เคย',
+      w.exposureDetails || '',
+      w.pastTbHistory ? 'เคย' : 'ไม่เคย',
+      JSON.stringify(w.symptoms || {}),
+      w.latentTbTestType || 'none',
+      w.latentTbTestResult || '',
+      w.tptStatus || 'not_indicated',
+      w.tptRegimen || '',
+      records.length,
+      JSON.stringify(records),
+      latest?.date || '',
+      latest?.result || '',
+      latest?.resultDetail || '',
+      latest?.nextScheduledDate || '',
+      w.notes || '',
+      w.createdAt || new Date().toISOString(),
+      w.updatedAt || new Date().toISOString(),
+      w.lastUpdatedBy || '',
+    ];
+  });
+
+  if (hcwRows.length > 0) {
+    batchUpdates.push({
+      range: `'${HEALTHCARE_WORKERS_SHEET_NAME}'!A2:AJ${hcwRows.length + 1}`,
+      values: hcwRows,
+    });
+  }
+
   if (batchUpdates.length > 0) {
     const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`, {
       method: 'POST',
@@ -1510,7 +1865,7 @@ export async function pushAllLocalDataToSheet(
     }
   }
 
-  const totalCount = patientRows.length + investigationRows.length + contactRows.length + logRows.length;
+  const totalCount = patientRows.length + investigationRows.length + contactRows.length + logRows.length + hcwRows.length;
   return { success: true, count: totalCount };
 }
 
@@ -1522,6 +1877,7 @@ export async function clearAllSheetData(accessToken: string, spreadsheetId: stri
       `${CONTACTS_SHEET_NAME}!A2:AD5000`,
       `${FOLLOW_UPS_SHEET_NAME}!A2:P5000`,
       `${DAILY_LOGS_SHEET_NAME}!A2:Y10000`,
+      `${HEALTHCARE_WORKERS_SHEET_NAME}!A2:AJ5000`,
     ];
     await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`, {
       method: 'POST',

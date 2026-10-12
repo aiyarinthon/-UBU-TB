@@ -28,6 +28,8 @@ import {
 import { Patient, DailyLog, InvestigationForm, ContactPerson, UserProfile } from '../types';
 import { PatientReportPdfModal } from './PatientReportPdfModal';
 import { formatThaiDate } from '../lib/dateUtils';
+import { normalizePatientStatus } from '../lib/patientUtils';
+import { maskPhoneNumber } from '../lib/securityUtils';
 
 interface Props {
   patient: Patient;
@@ -43,6 +45,7 @@ interface Props {
   spreadsheetUrl?: string | null;
   currentUserProfile?: UserProfile | null;
   onDeletePatient?: (patientId: string) => void;
+  isMaskingEnabled?: boolean;
 }
 
 export const PatientDetailView: React.FC<Props> = ({
@@ -59,6 +62,7 @@ export const PatientDetailView: React.FC<Props> = ({
   spreadsheetUrl,
   currentUserProfile,
   onDeletePatient,
+  isMaskingEnabled = false,
 }) => {
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -116,13 +120,21 @@ export const PatientDetailView: React.FC<Props> = ({
             <span className="text-xs font-semibold text-purple-800 bg-purple-100/70 px-2.5 py-0.5 rounded-full">
               ขึ้นทะเบียน n-tip: {patient.ntipRegistrationDate || '-'}
             </span>
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-              patient.status === 'active' ? 'bg-teal-100 text-teal-800' :
-              patient.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-              'bg-amber-100 text-amber-800'
-            }`}>
-              {patient.status === 'active' ? 'กำลังรักษา' : patient.status === 'completed' ? 'รักษาครบแล้ว' : 'ส่งต่อ/อื่นๆ'}
-            </span>
+            {(() => {
+              const norm = normalizePatientStatus(patient.status);
+              return (
+                <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
+                  norm === 'active' ? 'bg-teal-100 text-teal-800' :
+                  norm === 'completed' ? 'bg-blue-100 text-blue-800' :
+                  norm === 'transferred' ? 'bg-amber-100 text-amber-800' :
+                  'bg-rose-100 text-rose-800'
+                }`}>
+                  {norm === 'active' ? 'กำลังรักษา' :
+                   norm === 'completed' ? 'รักษาครบแล้ว' :
+                   norm === 'transferred' ? 'ส่งต่อ' : 'ขาดการรักษา'}
+                </span>
+              );
+            })()}
           </div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight">
             {patient.fullName}
@@ -130,7 +142,7 @@ export const PatientDetailView: React.FC<Props> = ({
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
             <span>อายุ {patient.age} ปี ({patient.gender === 'male' ? 'เพศชาย' : patient.gender === 'female' ? 'เพศหญิง' : 'เพศอื่นๆ'})</span>
             <span>•</span>
-            <span className="flex items-center gap-1"><Phone className="w-3 h-3 text-slate-400" /> {patient.phone || '-'}</span>
+            <span className="flex items-center gap-1 font-mono"><Phone className="w-3 h-3 text-slate-400" /> {maskPhoneNumber(patient.phone, isMaskingEnabled)}</span>
             {patient.email && (
               <>
                 <span>•</span>
@@ -291,6 +303,43 @@ export const PatientDetailView: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* Treatment Regimen & Clinical Details Card */}
+      <div className="bg-gradient-to-r from-teal-900 via-teal-800 to-emerald-900 text-white rounded-3xl p-5 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-xs flex items-center justify-center border border-white/20 shadow-xs flex-shrink-0">
+              <Pill className="w-6 h-6 text-teal-300" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-teal-200 uppercase tracking-wider flex items-center gap-2">
+                <span>สูตรยารักษาที่ได้รับ (Treatment Regimen)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 border border-white/20 text-white font-mono">
+                  {patient.treatmentCategory || 'Cat 1'}
+                </span>
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight mt-0.5">
+                {patient.treatmentRegimen || '2HRZE/4HR'}
+              </div>
+              <div className="text-xs text-teal-100/90 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>การจำแนก: <strong>{patient.tbClassification || 'Pulmonary (Bacteriologically Confirmed)'}</strong></span>
+                {patient.weightKg ? <span>• น้ำหนักตัว: <strong>{patient.weightKg} กก.</strong></span> : null}
+                {patient.doctorName ? <span>• แพทย์: <strong>{patient.doctorName}</strong></span> : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onEditPatient}
+              className="px-3.5 py-2 text-xs font-bold bg-white/15 hover:bg-white/25 text-white border border-white/30 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              แก้ไขสูตรยา / ข้อมูลรักษา
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Disease Investigation and Contact Tracing Summary Block */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Investigation summary card */}
@@ -443,7 +492,7 @@ export const PatientDetailView: React.FC<Props> = ({
                     </span>
                   </div>
                   <div className="text-slate-500 text-[11px] mt-0.5">
-                    HN: {c.hn || '-'} • อายุ {c.age} ปี • {c.relationship} • โทร: {c.phone || '-'}
+                    HN: {c.hn || '-'} • อายุ {c.age} ปี • {c.relationship} • โทร: <span className="font-mono">{maskPhoneNumber(c.phone, isMaskingEnabled)}</span>
                   </div>
                   <div className="text-[10px] text-teal-700 font-semibold mt-1">
                     {c.age > 5 ? '📌 เกณฑ์ CXR 4 ครั้ง' : '📌 เกณฑ์ IGRA/TPT (เด็กเล็ก)'} {c.ntipStatus === 'entered' && `• n-tip: ${c.ntipKeyCode || 'คีย์แล้ว'}`}

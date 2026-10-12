@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   FileText, 
   X, 
@@ -20,8 +20,9 @@ import {
   Award,
   ChevronRight
 } from 'lucide-react';
-import { Patient, DailyLog, ContactPerson, ContactFollowUp, UserProfile } from '../types';
+import { Patient, DailyLog, ContactPerson, ContactFollowUp, InvestigationForm, UserProfile } from '../types';
 import { formatThaiDate, formatThaiDateTime } from '../lib/dateUtils';
+import { normalizePatientStatus, isContactTracked } from '../lib/patientUtils';
 
 interface Props {
   isOpen: boolean;
@@ -30,6 +31,7 @@ interface Props {
   logs: DailyLog[];
   contacts: ContactPerson[];
   followUps: ContactFollowUp[];
+  investigations?: InvestigationForm[];
   currentUserProfile?: UserProfile | null;
   initialDateRange?: { start: string; end: string; label: string };
 }
@@ -41,6 +43,7 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
   logs,
   contacts,
   followUps,
+  investigations = [],
   currentUserProfile,
   initialDateRange
 }) => {
@@ -92,15 +95,107 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
 
   // --- 1. KPI Calculations (National TB Control Program - 3 Key Indicators) ---
   const totalIndexPatients = filteredPatients.length;
-  const activePatients = filteredPatients.filter(p => p.status === 'active').length;
-  const curedOrCompleted = filteredPatients.filter(p => p.status === 'completed').length;
-  const defaulted = filteredPatients.filter(p => p.status === 'defaulted').length;
+  const activePatients = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'active').length;
+  const curedOrCompleted = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'completed').length;
+  const defaulted = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'defaulted').length;
+  const transferred = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'transferred').length;
   const closedCases = curedOrCompleted + defaulted;
 
   const totalContacts = filteredContacts.length;
+  const trackedContacts = filteredContacts.filter(c => isContactTracked(c, followUps));
+  const trackedContactsCount = trackedContacts.length;
+  const trackedCoveragePct = totalContacts > 0 ? Math.round((trackedContactsCount / totalContacts) * 100) : 0;
   const householdContacts = filteredContacts.filter(c => c.contactType === 'household');
   const nonHouseholdContacts = filteredContacts.filter(c => c.contactType === 'non_household');
   const under5Contacts = filteredContacts.filter(c => c.age <= 5 || c.protocolType === 'igra_tpt');
+
+  // Contact statistics from Disease Investigation (กลุ่มเสี่ยงที่ต้องติดตาม ดึงจากการสอบสวนโรค)
+  const investigatedStats = useMemo(() => {
+    let householdCount = 0;
+    let nonHouseholdCount = 0;
+    let under5Count = 0;
+    let investigatedPatientsCount = 0;
+    const countedHns = new Set<string>();
+
+    filteredPatients.forEach(p => {
+      const inv = investigations?.find(i => 
+        (i.patientId && p.id && i.patientId === p.id) ||
+        (i.patientHN && p.hn && i.patientHN.trim().toLowerCase() === p.hn.trim().toLowerCase())
+      );
+
+      const regHousehold = filteredContacts.filter(c => 
+        (c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) &&
+        c.contactType === 'household'
+      ).length;
+
+      const regNonHousehold = filteredContacts.filter(c => 
+        (c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) &&
+        c.contactType === 'non_household'
+      ).length;
+
+      let house = 0;
+      if (inv?.householdContactsCount !== undefined && inv.householdContactsCount !== null) {
+        house = Number(inv.householdContactsCount) || 0;
+      } else if (p.householdContactsCount !== undefined && p.householdContactsCount !== null) {
+        house = Math.max(Number(p.householdContactsCount) || 0, regHousehold);
+      } else {
+        house = regHousehold;
+      }
+
+      let nonHouse = 0;
+      if (inv?.nonHouseholdContactsCount !== undefined && inv.nonHouseholdContactsCount !== null) {
+        nonHouse = Number(inv.nonHouseholdContactsCount) || 0;
+      } else if (p.nonHouseholdContactsCount !== undefined && p.nonHouseholdContactsCount !== null) {
+        nonHouse = Math.max(Number(p.nonHouseholdContactsCount) || 0, regNonHousehold);
+      } else {
+        nonHouse = regNonHousehold;
+      }
+
+      const u5 = inv?.under5ContactsCount !== undefined && inv.under5ContactsCount !== null
+        ? Number(inv.under5ContactsCount) || 0
+        : filteredContacts.filter(c => 
+            (c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) && 
+            (c.age <= 5 || c.protocolType === 'igra_tpt')
+          ).length;
+
+      const isInvestigated = inv !== undefined || p.investigationStatus === 'completed' || (house + nonHouse > 0);
+      if (isInvestigated) {
+        investigatedPatientsCount += 1;
+      }
+
+      householdCount += house;
+      nonHouseholdCount += nonHouse;
+      under5Count += u5;
+
+      if (p.hn) countedHns.add(p.hn.trim().toLowerCase());
+      if (p.id) countedHns.add(p.id);
+    });
+
+    if (investigations) {
+      investigations.forEach(inv => {
+        const alreadyCounted = (inv.patientHN && countedHns.has(inv.patientHN.trim().toLowerCase())) ||
+          (inv.patientId && countedHns.has(inv.patientId));
+        if (!alreadyCounted) {
+          householdCount += Number(inv.householdContactsCount) || 0;
+          nonHouseholdCount += Number(inv.nonHouseholdContactsCount) || 0;
+          under5Count += Number(inv.under5ContactsCount) || 0;
+          investigatedPatientsCount += 1;
+        }
+      });
+    }
+
+    const totalInvestigated = householdCount + nonHouseholdCount;
+    const targetContactsToTrack = totalInvestigated > 0 ? totalInvestigated : filteredContacts.length;
+
+    return {
+      householdCount,
+      nonHouseholdCount,
+      under5Count,
+      totalInvestigated,
+      targetContactsToTrack,
+      investigatedPatientsCount,
+    };
+  }, [filteredPatients, filteredContacts, investigations]);
   
   // KPI 1: อัตราความสำเร็จการรักษาผู้ป่วยวัณโรค (Target: > 85%)
   const treatmentSuccessRate = closedCases > 0 
@@ -114,7 +209,7 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
     filteredContacts.some(c => c.indexPatientId === p.id) ||
     ((p.householdContactsCount ?? 0) + (p.nonHouseholdContactsCount ?? 0) > 0)
   );
-  const investigatedPatientsCount = investigatedPatients.length;
+  const investigatedPatientsCount = Math.max(investigatedPatients.length, investigatedStats.investigatedPatientsCount);
   const investigationCoveragePct = totalIndexPatients > 0 
     ? Math.round((investigatedPatientsCount / totalIndexPatients) * 100) 
     : 0;
@@ -129,7 +224,7 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
   const isCxrCoveragePass = cxrCoveragePct >= 85;
 
   // Additional stats for clinical breakdown
-  const contactRatio = totalIndexPatients > 0 ? (totalContacts / totalIndexPatients).toFixed(1) : '0';
+  const contactRatio = totalIndexPatients > 0 ? (investigatedStats.targetContactsToTrack / totalIndexPatients).toFixed(1) : '0';
   const ntipRegisteredContacts = filteredContacts.filter(c => c.ntipStatus === 'entered');
   const under5OnTpt = under5Contacts.filter(c => c.tptStatus === 'on_tpt' || c.tptStatus === 'completed');
   const under5TptCoveragePct = under5Contacts.length > 0 ? Math.round((under5OnTpt.length / under5Contacts.length) * 100) : 100;
@@ -508,17 +603,29 @@ export const ExecutiveKpiReportModal: React.FC<Props> = ({
               </h4>
 
               <div className="space-y-2 text-xs">
-                <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
-                  <span className="text-slate-600">ผู้สัมผัสร่วมบ้าน (Household Contacts):</span>
-                  <span className="font-bold text-emerald-950">{householdContacts.length} คน ({totalContacts > 0 ? Math.round((householdContacts.length / totalContacts) * 100) : 0}%)</span>
+                <div className="flex justify-between items-center py-1 border-b border-slate-200/60 bg-emerald-50/50 px-2 rounded-lg">
+                  <span className="text-teal-900 font-semibold">กลุ่มเสี่ยงที่ต้องติดตาม (จากการสอบสวน):</span>
+                  <span className="font-bold text-teal-950">{investigatedStats.targetContactsToTrack} คน | ติดตามได้ {trackedContactsCount} คน ({investigatedStats.targetContactsToTrack > 0 ? Math.round((trackedContactsCount / investigatedStats.targetContactsToTrack) * 100) : 0}%)</span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
-                  <span className="text-slate-600">ผู้สัมผัสนอกบ้าน (Non-household Contacts):</span>
-                  <span className="font-bold text-slate-800">{nonHouseholdContacts.length} คน ({totalContacts > 0 ? Math.round((nonHouseholdContacts.length / totalContacts) * 100) : 0}%)</span>
+                  <span className="text-slate-600">อัตราการค้นหาต่อผู้ป่วยดัชนี (Contact Ratio):</span>
+                  <span className="font-bold text-slate-900">{contactRatio} คน/ดัชนี (เป้าหมาย &ge; 3.0)</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
+                  <span className="text-slate-600">ผู้สัมผัสร่วมบ้าน (จากการสอบสวน):</span>
+                  <span className="font-bold text-emerald-950">{investigatedStats.householdCount} คน {householdContacts.length > 0 && <span className="text-[11px] font-normal text-slate-500">(ลงทะเบียน {householdContacts.length} คน)</span>}</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
+                  <span className="text-slate-600">ผู้สัมผัสนอกบ้าน (จากการสอบสวน):</span>
+                  <span className="font-bold text-slate-800">{investigatedStats.nonHouseholdCount} คน {nonHouseholdContacts.length > 0 && <span className="text-[11px] font-normal text-slate-500">(ลงทะเบียน {nonHouseholdContacts.length} คน)</span>}</span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
                   <span className="text-slate-600">เด็กอายุ ≤ 5 ปี (High-risk Age Group):</span>
-                  <span className="font-bold text-amber-900">{under5Contacts.length} คน (ตรวจ TPT {under5OnTpt.length} คน)</span>
+                  <span className="font-bold text-amber-900">{investigatedStats.under5Count} คน (ตรวจ TPT {under5OnTpt.length} คน)</span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-slate-200/60">
+                  <span className="text-slate-600">รายชื่อผู้สัมผัสที่ขึ้นทะเบียนในระบบ:</span>
+                  <span className="font-bold text-slate-900">{totalContacts} คน</span>
                 </div>
                 <div className="flex justify-between items-center py-1">
                   <span className="text-slate-600">การให้ยาป้องกัน TPT ทั้งหมด:</span>

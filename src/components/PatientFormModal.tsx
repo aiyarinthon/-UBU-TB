@@ -17,10 +17,23 @@ import {
   Users,
   Home,
   HelpCircle,
-  ShieldCheck
+  ShieldCheck,
+  Pill,
+  Sparkles
 } from 'lucide-react';
 import { Patient, UserProfile } from '../types';
 import { ContactCriteriaModal } from './ContactCriteriaModal';
+import { normalizePatientStatus } from '../lib/patientUtils';
+
+export const STANDARD_TB_REGIMENS = [
+  { code: '2HRZE/4HR', label: '2HRZE/4HR (สูตรมาตรฐานรายใหม่ 6 เดือน - New Case Cat 1)', desc: '2 เดือนแรก: H+R+Z+E, 4 เดือนหลัง: H+R' },
+  { code: '2HRZE/7HR', label: '2HRZE/7HR (สูตร 9 เดือน - TB กระดูก/ต่อมน้ำเหลือง/มีเบาหวาน)', desc: '2 เดือนแรก: H+R+Z+E, 7 เดือนหลัง: H+R' },
+  { code: '2HRZE/10HR', label: '2HRZE/10HR (สูตร 12 เดือน - TB สมอง/ระบบประสาท CNS)', desc: '2 เดือนแรก: H+R+Z+E, 10 เดือนหลัง: H+R' },
+  { code: '2HRZES/1HRZE/5HRE', label: '2HRZES/1HRZE/5HRE (สูตรผู้ป่วยรักษาซ้ำ - Cat 2 Retreatment)', desc: 'มี Streptomycin ร่วมในการรักษาซ้ำ' },
+  { code: '2HRZ/4HR', label: '2HRZ/4HR (สูตรในเด็ก / แพ้ Ethambutol)', desc: 'ไม่ใช้ Ethambutol เพื่อลดความเสี่ยงตามัว' },
+  { code: 'BPaLM', label: 'BPaLM (สูตรดื้อยา MDR/RR-TB 6 เดือน)', desc: 'Bedaquiline + Pretomanid + Linezolid + Moxifloxacin' },
+  { code: 'BPaL', label: 'BPaL (สูตรดื้อยา MDR/RR-TB)', desc: 'Bedaquiline + Pretomanid + Linezolid' },
+];
 
 interface Props {
   isOpen: boolean;
@@ -49,7 +62,10 @@ export const PatientFormModal: React.FC<Props> = ({
   const actorName = currentUserProfile?.displayName || currentUserName || currentUserProfile?.email || 'เจ้าหน้าที่ (ระบบ)';
 
   const [formData, setFormData] = useState<Partial<Patient>>(() => {
-    if (initialData) return { ...initialData };
+    if (initialData) return { 
+      ...initialData,
+      status: normalizePatientStatus(initialData.status),
+    };
     const randomId = `TB-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const today = new Date().toISOString().split('T')[0];
 
@@ -154,7 +170,7 @@ export const PatientFormModal: React.FC<Props> = ({
         householdContactsCount: Number(formData.householdContactsCount) || 0,
         nonHouseholdContactsCount: Number(formData.nonHouseholdContactsCount) || 0,
         investigationStatus: formData.investigationStatus || duplicateMatch?.investigationStatus || 'pending',
-        status: formData.status || duplicateMatch?.status || 'active',
+        status: normalizePatientStatus(formData.status || duplicateMatch?.status || 'active'),
         notes: formData.notes || duplicateMatch?.notes || '',
         lastUpdatedBy: actorName,
         updatedAt: new Date().toISOString(),
@@ -439,8 +455,8 @@ export const PatientFormModal: React.FC<Props> = ({
                     สถานะการรักษา
                   </label>
                   <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                    value={normalizePatientStatus(formData.status)}
+                    onChange={(e) => setFormData({ ...formData, status: normalizePatientStatus(e.target.value) })}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl"
                   >
                     <option value="active">กำลังรับการรักษา (Active)</option>
@@ -452,13 +468,146 @@ export const PatientFormModal: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* 3. Contact Risk Screening Section (Household vs Non-household) with Pop-up trigger */}
+            {/* 3. สูตรยารักษาและการดูแลทางคลินิก (Treatment Regimen & Clinical Diagnosis) */}
+            <div className="bg-gradient-to-br from-teal-50/90 via-emerald-50/40 to-teal-50/80 border-2 border-teal-300 rounded-3xl p-5 space-y-4 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-teal-200/80 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-teal-700 text-white flex items-center justify-center shadow-xs">
+                    <Pill className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-teal-950 flex items-center gap-2">
+                      3. สูตรยารักษาและการดูแลทางคลินิก (Treatment Regimen)
+                    </h3>
+                    <p className="text-xs text-teal-800">
+                      บันทึกสูตรยาวัณโรคตามแนวทางการรักษาของกรมควบคุมโรค (NTIP & DDC)
+                    </p>
+                  </div>
+                </div>
+
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-teal-100 text-teal-900 border border-teal-300 w-fit">
+                  กำหนดสูตรยา (Regimen)
+                </span>
+              </div>
+
+              {/* Main Regimen Input & Presets */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-800">
+                    สูตรยาที่ได้รับ (Treatment Regimen) <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-teal-700 font-medium">พิมพ์เองหรือกดเลือกสูตรด้านล่าง</span>
+                </div>
+                
+                <div className="relative">
+                  <input
+                    type="text"
+                    list="tb-regimen-list"
+                    value={formData.treatmentRegimen || ''}
+                    onChange={(e) => setFormData({ ...formData, treatmentRegimen: e.target.value })}
+                    placeholder="เช่น 2HRZE/4HR หรือระบุสูตรยาและขนาดที่แพทย์สั่ง"
+                    required
+                    className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm font-bold text-teal-950 bg-white border-2 border-teal-400 rounded-2xl focus:ring-2 focus:ring-teal-600 focus:border-teal-600 font-mono shadow-xs"
+                  />
+                  <Pill className="w-4 h-4 text-teal-600 absolute left-3.5 top-3.5" />
+                  <datalist id="tb-regimen-list">
+                    {STANDARD_TB_REGIMENS.map(r => (
+                      <option key={r.code} value={r.code}>{r.label}</option>
+                    ))}
+                  </datalist>
+                </div>
+
+                {/* Quick Selection Chips */}
+                <div className="pt-1">
+                  <div className="text-[11px] font-semibold text-slate-600 mb-1.5 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                    <span>คลิกเลือกสูตรยามาตรฐานที่ใช้บ่อย (Quick Select):</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STANDARD_TB_REGIMENS.map(reg => {
+                      const isSelected = (formData.treatmentRegimen || '').trim() === reg.code;
+                      return (
+                        <button
+                          key={reg.code}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, treatmentRegimen: reg.code })}
+                          className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 border cursor-pointer ${
+                            isSelected
+                              ? 'bg-teal-700 text-white border-teal-800 shadow-xs'
+                              : 'bg-white hover:bg-teal-100/80 text-teal-900 border-teal-200 hover:border-teal-400'
+                          }`}
+                          title={reg.desc}
+                        >
+                          <span className="font-mono">{reg.code}</span>
+                          {isSelected && <span className="text-[10px]">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Drug Abbreviations Legend */}
+                <div className="bg-white/90 border border-teal-200/80 rounded-2xl p-2.5 text-[11px] text-teal-950 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-bold text-teal-800">รหัสตัวย่อ:</span>
+                  <span><strong className="text-emerald-700 font-mono">H:</strong> Isoniazid</span>
+                  <span><strong className="text-teal-700 font-mono">R:</strong> Rifampicin</span>
+                  <span><strong className="text-cyan-700 font-mono">Z:</strong> Pyrazinamide</span>
+                  <span><strong className="text-blue-700 font-mono">E:</strong> Ethambutol</span>
+                  <span><strong className="text-purple-700 font-mono">S:</strong> Streptomycin</span>
+                </div>
+              </div>
+
+              {/* Weight & Classification Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-teal-200/60">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    น้ำหนักตัวผู้ป่วย (กก.)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="1"
+                      max="200"
+                      value={formData.weightKg || ''}
+                      onChange={(e) => setFormData({ ...formData, weightKg: Number(e.target.value) || 0 })}
+                      placeholder="เช่น 55"
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl"
+                    />
+                  </div>
+                  {formData.weightKg && formData.weightKg > 0 ? (
+                    <div className="text-[10px] text-teal-800 font-semibold mt-1">
+                      {formData.weightKg < 38 ? 'ขนาดยา FDC: แนะนำ 2 เม็ด/วัน' :
+                       formData.weightKg <= 54 ? 'ขนาดยา FDC: แนะนำ 3 เม็ด/วัน' :
+                       formData.weightKg <= 70 ? 'ขนาดยา FDC: แนะนำ 4 เม็ด/วัน' : 'ขนาดยา FDC: แนะนำ 5 เม็ด/วัน'}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    การจำแนกประเภทวัณโรค (TB Classification)
+                  </label>
+                  <select
+                    value={formData.tbClassification}
+                    onChange={(e) => setFormData({ ...formData, tbClassification: e.target.value as any })}
+                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-xl"
+                  >
+                    <option value="Pulmonary (Bacteriologically Confirmed)">วัณโรคปอด ยืนยันทางแบคทีเรียวิทยา (AFB+ / GeneXpert+)</option>
+                    <option value="Pulmonary (Clinically Diagnosed)">วัณโรคปอด วินิจฉัยทางคลินิก (CXR+)</option>
+                    <option value="Extra-pulmonary">วัณโรคนอกปอด (Extra-pulmonary)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Contact Risk Screening Section (Household vs Non-household) with Pop-up trigger */}
             <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/80 border-2 border-emerald-300 rounded-3xl p-5 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-200/80 pb-3">
                 <div>
                   <h3 className="text-sm font-black text-emerald-950 flex items-center gap-2">
                     <Users className="w-5 h-5 text-emerald-700" />
-                    3. ข้อมูลจำนวนผู้สัมผัสเสี่ยง (Contact Risk Screening)
+                    4. ข้อมูลจำนวนผู้สัมผัสเสี่ยง (Contact Risk Screening)
                   </h3>
                   <p className="text-xs text-emerald-800">
                     แยกเป็นกลุ่มร่วมบ้าน และกลุ่มนอกบ้าน ตามเกณฑ์ของกรมควบคุมโรค

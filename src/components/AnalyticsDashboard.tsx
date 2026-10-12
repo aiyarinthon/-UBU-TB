@@ -36,7 +36,8 @@ import {
   ChevronRight,
   BookOpen
 } from 'lucide-react';
-import { Patient, DailyLog, ContactPerson, ContactFollowUp, UserProfile } from '../types';
+import { Patient, DailyLog, ContactPerson, ContactFollowUp, InvestigationForm, UserProfile, HealthcareWorker } from '../types';
+import { normalizePatientStatus, isContactTracked } from '../lib/patientUtils';
 import { ExecutiveKpiReportModal } from './ExecutiveKpiReportModal';
 import { GettingStartedGuide } from './GettingStartedGuide';
 
@@ -45,11 +46,13 @@ interface Props {
   logs: DailyLog[];
   contacts?: ContactPerson[];
   followUps?: ContactFollowUp[];
+  investigations?: InvestigationForm[];
+  healthcareWorkers?: HealthcareWorker[];
   currentUserProfile?: UserProfile | null;
   spreadsheetId?: string | null;
   spreadsheetUrl?: string | null;
   hasAccessToken?: boolean;
-  onNavigateTab?: (tab: 'patients' | 'contacts') => void;
+  onNavigateTab?: (tab: 'patients' | 'contacts' | 'hcw') => void;
 }
 
 export const AnalyticsDashboard: React.FC<Props> = ({ 
@@ -57,6 +60,8 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   logs, 
   contacts = [], 
   followUps = [],
+  investigations = [],
+  healthcareWorkers = [],
   currentUserProfile,
   spreadsheetId,
   spreadsheetUrl,
@@ -81,7 +86,7 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   };
 
   // Filter items according to selected date period
-  const filterByDate = <T extends { date?: string; diagnosisDate?: string; createdAt?: string; scheduledDate?: string }>(items: T[]): T[] => {
+  const filterByDate = <T extends { date?: string; diagnosisDate?: string; createdAt?: string; scheduledDate?: string; investigationDate?: string; updatedAt?: string }>(items: T[]): T[] => {
     if (dateFilterMode === 'all') return items;
 
     let startDate = customStartDate;
@@ -106,7 +111,7 @@ export const AnalyticsDashboard: React.FC<Props> = ({
     if (!startDate && !endDate) return items;
 
     return items.filter(item => {
-      const itemDate = item.diagnosisDate || item.date || item.createdAt || item.scheduledDate;
+      const itemDate = item.diagnosisDate || item.date || item.investigationDate || item.createdAt || item.updatedAt || item.scheduledDate;
       if (!itemDate) return true;
       const cleanDate = itemDate.split('T')[0];
       if (startDate && cleanDate < startDate) return false;
@@ -118,11 +123,104 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   const filteredPatients = useMemo(() => filterByDate<Patient>(patients), [patients, dateFilterMode, customStartDate, customEndDate]);
   const filteredLogs = useMemo(() => filterByDate<DailyLog>(logs), [logs, dateFilterMode, customStartDate, customEndDate]);
   const filteredContacts = useMemo(() => filterByDate<ContactPerson>(contacts), [contacts, dateFilterMode, customStartDate, customEndDate]);
+  const filteredInvestigations = useMemo(() => filterByDate<InvestigationForm>(investigations), [investigations, dateFilterMode, customStartDate, customEndDate]);
 
-  // General Cohort Stats
-  const activePatients = filteredPatients.filter(p => p.status === 'active');
-  const completedPatients = filteredPatients.filter(p => p.status === 'completed');
-  const defaultedPatients = filteredPatients.filter(p => p.status === 'defaulted');
+  // General Cohort Stats (Robust status normalization)
+  const activePatients = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'active');
+  const completedPatients = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'completed');
+  const defaultedPatients = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'defaulted');
+  const transferredPatients = filteredPatients.filter(p => normalizePatientStatus(p.status) === 'transferred');
+
+  // Contact statistics from Disease Investigation (กลุ่มเสี่ยงที่ต้องติดตาม ดึงจากการสอบสวนโรค)
+  const investigatedStats = useMemo(() => {
+    let householdCount = 0;
+    let nonHouseholdCount = 0;
+    let under5Count = 0;
+    let investigatedPatientsCount = 0;
+    const countedHns = new Set<string>();
+
+    filteredPatients.forEach(p => {
+      // Find matching investigation form if any
+      const inv = filteredInvestigations.find(i => 
+        (i.patientId && p.id && i.patientId === p.id) ||
+        (i.patientHN && p.hn && i.patientHN.trim().toLowerCase() === p.hn.trim().toLowerCase())
+      );
+
+      // Contact count from registered contact table for this patient
+      const regHousehold = filteredContacts.filter(c => 
+        (c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) &&
+        c.contactType === 'household'
+      ).length;
+
+      const regNonHousehold = filteredContacts.filter(c => 
+        (c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) &&
+        c.contactType === 'non_household'
+      ).length;
+
+      // Prioritize investigation form count, then patient.householdContactsCount, or registered count
+      let house = 0;
+      if (inv?.householdContactsCount !== undefined && inv.householdContactsCount !== null) {
+        house = Number(inv.householdContactsCount) || 0;
+      } else if (p.householdContactsCount !== undefined && p.householdContactsCount !== null) {
+        house = Math.max(Number(p.householdContactsCount) || 0, regHousehold);
+      } else {
+        house = regHousehold;
+      }
+
+      let nonHouse = 0;
+      if (inv?.nonHouseholdContactsCount !== undefined && inv.nonHouseholdContactsCount !== null) {
+        nonHouse = Number(inv.nonHouseholdContactsCount) || 0;
+      } else if (p.nonHouseholdContactsCount !== undefined && p.nonHouseholdContactsCount !== null) {
+        nonHouse = Math.max(Number(p.nonHouseholdContactsCount) || 0, regNonHousehold);
+      } else {
+        nonHouse = regNonHousehold;
+      }
+
+      const u5 = inv?.under5ContactsCount !== undefined && inv.under5ContactsCount !== null
+        ? Number(inv.under5ContactsCount) || 0
+        : filteredContacts.filter(c => 
+            (c.indexPatientId === p.id || (c.indexPatientHN && p.hn && c.indexPatientHN.toLowerCase() === p.hn.toLowerCase())) && 
+            (c.age <= 5 || c.protocolType === 'igra_tpt')
+          ).length;
+
+      const isInvestigated = inv !== undefined || p.investigationStatus === 'completed' || (house + nonHouse > 0);
+      if (isInvestigated) {
+        investigatedPatientsCount += 1;
+      }
+
+      householdCount += house;
+      nonHouseholdCount += nonHouse;
+      under5Count += u5;
+
+      if (p.hn) countedHns.add(p.hn.trim().toLowerCase());
+      if (p.id) countedHns.add(p.id);
+    });
+
+    // Also include any standalone investigations that weren't directly mapped to filteredPatients
+    filteredInvestigations.forEach(inv => {
+      const alreadyCounted = (inv.patientHN && countedHns.has(inv.patientHN.trim().toLowerCase())) ||
+        (inv.patientId && countedHns.has(inv.patientId));
+      if (!alreadyCounted) {
+        householdCount += Number(inv.householdContactsCount) || 0;
+        nonHouseholdCount += Number(inv.nonHouseholdContactsCount) || 0;
+        under5Count += Number(inv.under5ContactsCount) || 0;
+        investigatedPatientsCount += 1;
+      }
+    });
+
+    const totalInvestigated = householdCount + nonHouseholdCount;
+    // กลุ่มเสี่ยงที่ต้องติดตาม (ดึงจากการสอบสวน) หรือถ้ามีผู้สัมผัสที่ลงทะเบียนมากกว่าให้ครอบคลุม
+    const targetContactsToTrack = totalInvestigated > 0 ? totalInvestigated : filteredContacts.length;
+
+    return {
+      householdCount,
+      nonHouseholdCount,
+      under5Count,
+      totalInvestigated,
+      targetContactsToTrack,
+      investigatedPatientsCount,
+    };
+  }, [filteredPatients, filteredContacts, filteredInvestigations]);
 
   // Contact tracing statistics
   const householdContacts = filteredContacts.filter(c => c.contactType === 'household');
@@ -134,6 +232,16 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   );
   const onTpt = filteredContacts.filter(c => c.tptStatus === 'on_tpt' || c.tptStatus === 'completed');
   const under5OnTpt = under5Contacts.filter(c => c.tptStatus === 'on_tpt' || c.tptStatus === 'completed');
+
+  // Tracked Contacts (CXR, IGRA, TPT, NTIP or follow-up recorded)
+  const trackedContacts = useMemo(() => {
+    return filteredContacts.filter(c => isContactTracked(c, followUps));
+  }, [filteredContacts, followUps]);
+  const trackedContactsCount = trackedContacts.length;
+  const trackedCoveragePct = filteredContacts.length > 0 ? Math.round((trackedContactsCount / filteredContacts.length) * 100) : 0;
+  const trackedCoverageAgainstTargetPct = investigatedStats.targetContactsToTrack > 0 
+    ? Math.round((trackedContactsCount / investigatedStats.targetContactsToTrack) * 100) 
+    : (filteredContacts.length > 0 ? Math.round((trackedContactsCount / filteredContacts.length) * 100) : 0);
 
   // CXR Findings Breakdown
   const cxrNormal = filteredContacts.filter(c => c.cxrResult === 'normal').length;
@@ -152,8 +260,10 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   const cxrRound3Count = followUps.filter(f => f.stepType === 'cxr_3_12m' && f.status === 'completed').length;
   const cxrRound4Count = followUps.filter(f => f.stepType === 'cxr_4_18m' && f.status === 'completed').length;
 
-  // KPI Calculations
-  const contactRatio = filteredPatients.length > 0 ? (filteredContacts.length / filteredPatients.length).toFixed(1) : '0';
+  // KPI Calculations (ดึงจากผลการสอบสวนโรคตามเกณฑ์ สธ./DDC)
+  const contactRatio = filteredPatients.length > 0 
+    ? (investigatedStats.targetContactsToTrack / filteredPatients.length).toFixed(1) 
+    : '0';
   const isRatioPass = parseFloat(contactRatio) >= 3.0;
 
   const cxrCoveragePct = filteredContacts.length > 0 ? Math.round((cxrDone.length / filteredContacts.length) * 100) : 0;
@@ -172,6 +282,65 @@ export const AnalyticsDashboard: React.FC<Props> = ({
   const closedCases = completedPatients.length + defaultedPatients.length;
   const treatmentSuccessRate = closedCases > 0 ? Math.round((completedPatients.length / closedCases) * 100) : (filteredPatients.length > 0 ? Math.round((completedPatients.length / filteredPatients.length) * 100) : 100);
   const isSuccessPass = treatmentSuccessRate >= 85;
+
+  // Healthcare Worker Screening Statistics (บุคลากรทางการแพทย์)
+  const hcwStats = useMemo(() => {
+    const activeWorkers = healthcareWorkers.filter(w => w.status === 'active');
+    const resignedWorkers = healthcareWorkers.filter(w => w.status !== 'active');
+    const highRiskWorkers = activeWorkers.filter(w => w.riskLevel === 'high');
+
+    const currentYear = new Date().getFullYear();
+    let screenedThisYearCount = 0;
+    let normalCount = 0;
+    let suspectTbCount = 0;
+    let oldCalcCount = 0;
+    let otherAbnormalCount = 0;
+    let totalCxrCount = 0;
+    let consistentlyNormalCount = 0;
+
+    activeWorkers.forEach(w => {
+      const records = w.cxrRecords || [];
+      totalCxrCount += records.length;
+      if (records.length > 0) {
+        const sorted = [...records].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const latest = sorted[0];
+        const year = new Date(latest.date).getFullYear();
+        if (year === currentYear || year === currentYear - 1) {
+          screenedThisYearCount += 1;
+        }
+        if (latest.result === 'normal') normalCount += 1;
+        else if (latest.result === 'abnormal_suspect_tb') suspectTbCount += 1;
+        else if (latest.result === 'abnormal_calcification_old') oldCalcCount += 1;
+        else if (latest.result === 'abnormal_other') otherAbnormalCount += 1;
+
+        if (records.length > 0 && records.every(r => r.result === 'normal')) {
+          consistentlyNormalCount += 1;
+        }
+      }
+    });
+
+    const annualCoveragePct = activeWorkers.length > 0
+      ? Math.round((screenedThisYearCount / activeWorkers.length) * 100)
+      : 0;
+
+    const isHcwCoveragePass = annualCoveragePct >= 90;
+
+    return {
+      total: healthcareWorkers.length,
+      active: activeWorkers.length,
+      resigned: resignedWorkers.length,
+      highRisk: highRiskWorkers.length,
+      screenedThisYear: screenedThisYearCount,
+      annualCoveragePct,
+      isHcwCoveragePass,
+      normalCount,
+      suspectTbCount,
+      oldCalcCount,
+      otherAbnormalCount,
+      totalCxrCount,
+      consistentlyNormalCount
+    };
+  }, [healthcareWorkers]);
 
   // Adherence trend for the selected view
   const adherenceTrendData = useMemo(() => {
@@ -246,7 +415,7 @@ export const AnalyticsDashboard: React.FC<Props> = ({
 ช่วงเวลา: ${getPeriodLabel()}
 
 📊 สรุปผลการดำเนินงานตามตัวชี้วัดกระทรวงสาธารณสุข (NTIP & DDC):
-1. อัตราการค้นหาผู้สัมผัสโรคต่อผู้ป่วยดัชนี: ${contactRatio} คน/ราย (เป้าหมาย ≥ 3.0) -> ${isRatioPass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
+1. การค้นหาและติดตามผู้สัมผัสโรค (จากการสอบสวน): กลุ่มเสี่ยง ${investigatedStats.targetContactsToTrack} คน (ร่วมบ้าน ${investigatedStats.householdCount}, นอกบ้าน ${investigatedStats.nonHouseholdCount}), ติดตามได้แล้ว ${trackedContactsCount} คน (อัตราส่วน ${contactRatio} คน/ดัชนี, เป้าหมาย ≥ 3.0, สอบสวนแล้ว ${investigatedStats.investigatedPatientsCount}/${filteredPatients.length} ราย) -> ${isRatioPass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
 2. ความครอบคลุมการตรวจ CXR ในผู้สัมผัส: ${cxrCoveragePct}% (${cxrDone.length}/${filteredContacts.length} คน, เป้าหมาย ≥ 90%) -> ${isCxrCoveragePass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
 3. การขึ้นทะเบียนระบบ NTIP: ${ntipCoveragePct}% (${ntipRegistered.length}/${filteredContacts.length} คน, เป้าหมาย 100%) -> ${isNtipPass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
 4. การให้ยาป้องกัน TPT ในเด็ก ≤ 5 ปี: ${under5TptPct}% (${under5OnTpt.length}/${under5Contacts.length} คน, เป้าหมาย 100%) -> ${isUnder5TptPass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
@@ -467,7 +636,7 @@ export const AnalyticsDashboard: React.FC<Props> = ({
                 onClick={() => onNavigateTab('contacts')}
                 className="text-xs font-bold text-teal-700 hover:text-teal-800 flex items-center gap-1 cursor-pointer"
               >
-                <span>ไปที่แถบการติดตามกลุ่มเสี่ยง</span>
+                <span>ไปที่ระบบติดตามกลุ่มเสี่ยง</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             )}
@@ -477,30 +646,68 @@ export const AnalyticsDashboard: React.FC<Props> = ({
         {/* 4 Contact Tracing Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
-          {/* Contact 1: การค้นหาผู้สัมผัส */}
-          <div className={`p-4 sm:p-5 rounded-2xl border transition ${
+          {/* Contact 1: การค้นหาและกลุ่มเสี่ยงที่ต้องติดตาม (ดึงจากการสอบสวน) */}
+          <div className={`p-4 sm:p-5 rounded-2xl border transition flex flex-col justify-between ${
             isRatioPass ? 'bg-emerald-50/50 border-emerald-300' : 'bg-amber-50/60 border-amber-300'
           }`}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-bold text-slate-800">การค้นหาผู้สัมผัส</span>
-              <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
-                isRatioPass ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'
-              }`}>
-                {isRatioPass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
-              </span>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800">กลุ่มเสี่ยงที่ต้องติดตาม (จากการสอบสวน)</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                  isRatioPass ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'
+                }`}>
+                  {isRatioPass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
+                </span>
+              </div>
+
+              {/* Sub-cards: กลุ่มเสี่ยงที่ต้องติดตาม (ดึงจากการสอบสวน) vs ติดตามได้แล้ว */}
+              <div className="mt-2.5 grid grid-cols-2 gap-2">
+                <div className="bg-white/90 rounded-xl p-2.5 border border-slate-200/90 shadow-2xs">
+                  <span className="text-[11px] font-semibold text-slate-600 block leading-tight">กลุ่มเสี่ยงที่ต้องติดตาม</span>
+                  <span className="text-[9px] text-teal-700 font-medium block">(ดึงจากการสอบสวน)</span>
+                  <div className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
+                    {investigatedStats.targetContactsToTrack} <span className="text-xs font-normal text-slate-500">คน</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1 font-medium leading-tight">
+                    ร่วมบ้าน {investigatedStats.householdCount} • นอกบ้าน {investigatedStats.nonHouseholdCount}
+                  </div>
+                </div>
+                <div className="bg-white/90 rounded-xl p-2.5 border border-teal-200 shadow-2xs">
+                  <span className="text-[11px] font-semibold text-teal-800 block leading-tight">ติดตามได้แล้ว</span>
+                  <span className="text-[9px] text-teal-600 font-medium block">(ตรวจ/คัดกรองแล้ว)</span>
+                  <div className="text-xl sm:text-2xl font-black text-teal-800 mt-1">
+                    {trackedContactsCount} <span className="text-xs font-semibold text-teal-600">คน</span>
+                  </div>
+                  <div className="text-[10px] text-teal-700 mt-1 font-medium leading-tight">
+                    {trackedCoverageAgainstTargetPct}% ของกลุ่มเสี่ยง
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
-              {contactRatio} <span className="text-xs font-normal text-slate-600">คน/ผู้ป่วยดัชนี</span>
-            </div>
-            <div className="text-xs text-slate-600 mt-2 flex flex-wrap items-center justify-between gap-1">
-              <span>เป้าหมาย: &ge; 3.0</span>
-              <span>รวม {filteredContacts.length} คน ({filteredPatients.length} ดัชนี)</span>
-            </div>
-            <div className="w-full bg-slate-200/80 rounded-full h-1.5 mt-2.5 overflow-hidden">
-              <div 
-                className={`h-1.5 rounded-full ${isRatioPass ? 'bg-emerald-600' : 'bg-amber-500'}`}
-                style={{ width: `${Math.min(100, (parseFloat(contactRatio) / 4) * 100)}%` }}
-              />
+
+            <div className="mt-2.5 pt-2 border-t border-slate-200/60 space-y-1">
+              <div className="text-xs text-slate-600 flex flex-wrap items-center justify-between gap-1">
+                <span>อัตราค้นหา: <strong className="text-slate-900 font-bold">{contactRatio}</strong> คน/ดัชนี (เป้าหมาย &ge; 3.0)</span>
+                <span className="text-slate-500 text-[10px]">ผู้ป่วยดัชนี {filteredPatients.length} ราย (สอบสวน {investigatedStats.investigatedPatientsCount}/{filteredPatients.length})</span>
+              </div>
+
+              {filteredContacts.length > 0 && (
+                <div className="text-[10px] text-slate-500 flex items-center justify-between pt-0.5">
+                  <span>ขึ้นทะเบียนรายชื่อในระบบ: <strong className="text-slate-700">{filteredContacts.length}</strong> คน</span>
+                  {investigatedStats.targetContactsToTrack > filteredContacts.length ? (
+                    <span className="text-amber-700 font-medium">รอขึ้นทะเบียนอีก {investigatedStats.targetContactsToTrack - filteredContacts.length} คน</span>
+                  ) : (
+                    <span className="text-emerald-700 font-medium">ครบตามยอดสอบสวน</span>
+                  )}
+                </div>
+              )}
+
+              <div className="w-full bg-slate-200/80 rounded-full h-1.5 mt-1 overflow-hidden">
+                <div 
+                  className={`h-1.5 rounded-full ${isRatioPass ? 'bg-emerald-600' : 'bg-amber-500'}`}
+                  style={{ width: `${Math.min(100, (parseFloat(contactRatio) / 3.0) * 100)}%` }}
+                />
+              </div>
             </div>
           </div>
 
@@ -589,7 +796,177 @@ export const AnalyticsDashboard: React.FC<Props> = ({
 
       </div>
 
-      {/* 4. Charts & Surveillance Analytics */}
+      {/* 4. Healthcare Workers Screening Overview (การคัดกรองในบุคลากรทางการแพทย์) */}
+      <div className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-2xs space-y-4">
+        
+        {/* Section Header */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Stethoscope className="w-5 h-5 text-teal-700" />
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                  การคัดกรองวัณโรคในบุคลากรทางการแพทย์ (Healthcare Personnel TB Screening)
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-bold">
+                  Infection Control
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-light mt-0.5">
+                ติดตามการตรวจเอกซเรย์ปอดประจำปี เพิ่มประวัติ CXR ได้เรื่อยๆ วิเคราะห์แนวโน้มสุขภาพปอดรายบุคคล และเก็บฐานข้อมูลผู้ที่ลาออก
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {onNavigateTab && (
+              <button
+                onClick={() => onNavigateTab('hcw')}
+                className="text-xs font-bold text-teal-700 hover:text-teal-800 flex items-center gap-1 cursor-pointer bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-xl transition"
+              >
+                <span>ไปที่ระบบจัดการบุคลากรทางการแพทย์</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 4 Healthcare Worker Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Card 1: บุคลากรปฏิบัติงาน & ฐานข้อมูลประวัติ */}
+          <div className="p-4 sm:p-5 rounded-2xl border border-slate-200 bg-slate-50/60 transition flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800">บุคลากรปฏิบัติงานทั้งหมด</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                  Active
+                </span>
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
+                {hcwStats.active} <span className="text-xs font-normal text-slate-500">คน</span>
+              </div>
+              <div className="text-xs text-slate-600 mt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span>เสี่ยงสูง (ER, ICU, TB, Lab):</span>
+                  <span className="font-semibold text-amber-700">{hcwStats.highRisk} คน</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>ฐานข้อมูลผู้ลาออกแล้ว:</span>
+                  <span className="font-semibold text-slate-700">{hcwStats.resigned} คน</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200/80 text-[11px] text-slate-500">
+              รวมในฐานข้อมูลทั้งหมด {hcwStats.total} คน
+            </div>
+          </div>
+
+          {/* Card 2: ความครอบคลุม CXR ประจำปี */}
+          <div className={`p-4 sm:p-5 rounded-2xl border transition flex flex-col justify-between ${
+            hcwStats.isHcwCoveragePass ? 'bg-emerald-50/50 border-emerald-300' : 'bg-amber-50/60 border-amber-300'
+          }`}>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800">ความครอบคลุม CXR ประจำปี</span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                  hcwStats.isHcwCoveragePass ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'
+                }`}>
+                  {hcwStats.isHcwCoveragePass ? '✅ ผ่านเกณฑ์' : '⚠️ ต้องเร่งรัด'}
+                </span>
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
+                {hcwStats.annualCoveragePct}%
+              </div>
+              <div className="text-xs text-slate-600 mt-2 flex flex-wrap items-center justify-between gap-1">
+                <span>เป้าหมาย: 100%</span>
+                <span>ตรวจแล้ว {hcwStats.screenedThisYear}/{hcwStats.active} คน</span>
+              </div>
+            </div>
+            <div className="w-full bg-slate-200/80 rounded-full h-1.5 mt-2.5 overflow-hidden">
+              <div 
+                className={`h-1.5 rounded-full ${hcwStats.isHcwCoveragePass ? 'bg-emerald-600' : 'bg-amber-500'}`}
+                style={{ width: `${Math.min(hcwStats.annualCoveragePct, 100)}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Card 3: ผลการตรวจ CXR ประจำปี */}
+          <div className={`p-4 sm:p-5 rounded-2xl border transition flex flex-col justify-between ${
+            hcwStats.suspectTbCount > 0 ? 'bg-rose-50/70 border-rose-300 ring-1 ring-rose-300' : 'bg-white border-slate-200'
+          }`}>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800">ผลการตรวจคัดกรองปอด (CXR)</span>
+                {hcwStats.suspectTbCount > 0 ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 animate-pulse">
+                    ⚠️ พบสงสัย TB
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                    ปลอดภัย
+                  </span>
+                )}
+              </div>
+              <div className="text-2xl sm:text-3xl font-black mt-2 text-slate-900">
+                {hcwStats.normalCount} <span className="text-xs font-normal text-slate-500">คนปกติ</span>
+              </div>
+              <div className="text-xs text-slate-600 mt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span>ปกติ (Normal Clear):</span>
+                  <span className="font-semibold text-emerald-700">{hcwStats.normalCount} คน</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>สงสัยวัณโรค (Suspect TB):</span>
+                  <span className={`font-bold ${hcwStats.suspectTbCount > 0 ? 'text-rose-700' : 'text-slate-700'}`}>
+                    {hcwStats.suspectTbCount} คน
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>รอยโรคเดิมคงที่ (Old Scar):</span>
+                  <span className="font-semibold text-amber-700">{hcwStats.oldCalcCount} คน</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200/80 text-[11px] text-slate-500">
+              {hcwStats.suspectTbCount > 0 ? 'ส่งตรวจเสมหะและปรึกษาแพทย์ทันที' : 'ทุกรายได้รับการบันทึกผลเรียบร้อย'}
+            </div>
+          </div>
+
+          {/* Card 4: สถิติแนวโน้มรายบุคคล */}
+          <div className="p-4 sm:p-5 rounded-2xl border border-teal-200 bg-gradient-to-br from-teal-50/50 to-emerald-50/30 transition flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800">สถิติแนวโน้มรายบุคคล</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800">
+                  Longitudinal
+                </span>
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-teal-950 mt-2">
+                {hcwStats.totalCxrCount} <span className="text-xs font-normal text-teal-700">ครั้งที่ตรวจสะสม</span>
+              </div>
+              <div className="text-xs text-slate-600 mt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span>ปกติสม่ำเสมอทุกรอบ:</span>
+                  <span className="font-semibold text-emerald-700">{hcwStats.consistentlyNormalCount} คน</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>ระบบบันทึกซ้ำ:</span>
+                  <span className="font-medium text-teal-800">เพิ่มผล CXR ได้ไม่จำกัด</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-teal-200/60 text-[11px] text-teal-800 flex items-center justify-between">
+              <span>ฐานข้อมูลเฝ้าระวังระยะยาว</span>
+              <TrendingUp className="w-3.5 h-3.5 text-teal-600" />
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* 5. Charts & Surveillance Analytics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Daily Adherence Trend Chart */}
@@ -759,6 +1136,7 @@ export const AnalyticsDashboard: React.FC<Props> = ({
           logs={filteredLogs}
           contacts={filteredContacts}
           followUps={followUps}
+          investigations={filteredInvestigations}
           currentUserProfile={currentUserProfile}
           initialDateRange={{
             start: customStartDate,

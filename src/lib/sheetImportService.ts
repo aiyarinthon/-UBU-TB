@@ -1,4 +1,5 @@
 import { Patient, ContactPerson, ContactFollowUp } from '../types';
+import { normalizePatientStatus } from './patientUtils';
 
 export interface SheetMetadata {
   spreadsheetId: string;
@@ -221,7 +222,7 @@ export async function importPatientsFromSheetTab(
       householdContactsCount: colHouseholdCount !== -1 ? Number(row[colHouseholdCount]) || 0 : (existingMatch?.householdContactsCount || 0),
       nonHouseholdContactsCount: colNonHouseholdCount !== -1 ? Number(row[colNonHouseholdCount]) || 0 : (existingMatch?.nonHouseholdContactsCount || 0),
       investigationStatus: existingMatch?.investigationStatus || 'pending',
-      status: (colStatus !== -1 ? (row[colStatus] as any) : existingMatch?.status) || 'active',
+      status: normalizePatientStatus(colStatus !== -1 ? row[colStatus] : existingMatch?.status),
       notes: colNotes !== -1 ? (row[colNotes] || '').trim() : (existingMatch?.notes || ''),
       createdAt: existingMatch?.createdAt || new Date().toISOString(),
       lastUpdatedBy: 'นำเข้าจาก Google Sheet',

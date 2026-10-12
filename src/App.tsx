@@ -13,6 +13,7 @@ import {
   fetchAllContacts,
   fetchAllFollowUps,
   appendPatientToSheet, 
+  savePatientToSheet,
   updatePatientInSheet, 
   deletePatientFromSheet,
   appendDailyLogToSheet, 
@@ -23,7 +24,10 @@ import {
   createTBSheet,
   findOrCreateTBSheet,
   clearAllSheetData,
-  pushAllLocalDataToSheet
+  pushAllLocalDataToSheet,
+  fetchAllHealthcareWorkers,
+  saveHealthcareWorkerToSheet,
+  deleteHealthcareWorkerFromSheet
 } from './lib/sheetsApi';
 import { 
   Patient, 
@@ -31,11 +35,13 @@ import {
   InvestigationForm, 
   ContactPerson, 
   ContactFollowUp,
+  HealthcareWorker,
+  HcwCxrRecord,
   UserProfile,
   StaffAccount
 } from './types';
 import { resolveUserProfile, Permissions, DEFAULT_STAFF_LIST } from './lib/userStore';
-import { SheetConfigBanner } from './components/SheetConfigBanner';
+import { normalizePatientStatus } from './lib/patientUtils';
 import { PatientList } from './components/PatientList';
 import { PatientDetailView } from './components/PatientDetailView';
 import { PatientFormModal } from './components/PatientFormModal';
@@ -45,6 +51,7 @@ import { InvestigationModal } from './components/InvestigationModal';
 import { ContactFormModal } from './components/ContactFormModal';
 import { ContactFollowUpModal } from './components/ContactFollowUpModal';
 import { ContactsView } from './components/ContactsView';
+import { HealthcareWorkersView } from './components/HealthcareWorkersView';
 import { BackendAdminModal } from './components/BackendAdminModal';
 import { LoginModal } from './components/LoginModal';
 import { ImportGoogleSheetModal } from './components/ImportGoogleSheetModal';
@@ -71,14 +78,27 @@ import {
   Settings,
   UserCheck,
   LayoutDashboard,
-  ArrowLeft
+  ArrowLeft,
+  UserX,
+  Eye,
+  EyeOff,
+  Lock,
+  Unlock
 } from 'lucide-react';
+import { 
+  getDataMaskingPreference, 
+  setDataMaskingPreference, 
+  getAutoLockMinutes, 
+  setAutoLockMinutes,
+  recordSecurityAuditLog 
+} from './lib/securityUtils';
 import {
   INITIAL_PATIENTS,
   INITIAL_DAILY_LOGS,
   INITIAL_INVESTIGATIONS,
   INITIAL_CONTACTS,
-  INITIAL_FOLLOWUPS
+  INITIAL_FOLLOWUPS,
+  INITIAL_HEALTHCARE_WORKERS
 } from './data/initialData';
 
 const STORAGE_SHEET_KEY = 'tb_care_spreadsheet_config';
@@ -109,8 +129,48 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isBackendAdminModalOpen, setIsBackendAdminModalOpen] = useState(false);
+  const [adminModalDefaultTab, setAdminModalDefaultTab] = useState<'sheets' | 'staff' | 'permissions' | 'security' | 'backup'>('security');
+  const [isDataMaskingEnabled, setIsDataMaskingEnabled] = useState<boolean>(() => getDataMaskingPreference());
+  const [autoLockMinutes, setAutoLockMinutesState] = useState<number>(() => getAutoLockMinutes());
+  const [isScreenLocked, setIsScreenLocked] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importModalMode, setImportModalMode] = useState<'patient' | 'contact'>('patient');
+
+  // Auto-lock session timer
+  useEffect(() => {
+    if (autoLockMinutes <= 0 || isScreenLocked) return;
+
+    let timeoutId: any;
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setIsScreenLocked(true);
+      }, autoLockMinutes * 60 * 1000);
+    };
+
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach(evt => window.removeEventListener(evt, resetTimer));
+    };
+  }, [autoLockMinutes, isScreenLocked]);
+
+  const handleToggleMasking = (val?: boolean) => {
+    const nextVal = typeof val === 'boolean' ? val : !isDataMaskingEnabled;
+    setIsDataMaskingEnabled(nextVal);
+    setDataMaskingPreference(nextVal);
+    recordSecurityAuditLog({
+      userName: currentUserProfile?.name || currentUser?.displayName || 'เจ้าหน้าที่',
+      userEmail: currentUserProfile?.email || currentUser?.email || '',
+      userRole: currentUserProfile?.role || 'staff',
+      action: 'SECURITY_CHANGE',
+      details: `ปรับโหมดพรางข้อมูลส่วนบุคคลบนหน้าจอ: ${nextVal ? 'เปิดใช้งาน (Masked)' : 'ปิดการพราง (Unmasked)'}`
+    });
+    showToast('success', nextVal ? 'เปิดโหมดพรางข้อมูลส่วนบุคคล (PDPA Privacy Mode)' : 'ปิดโหมดพรางข้อมูล แสดงข้อมูลเต็ม');
+  };
 
   // Sync token changes to localStorage
   useEffect(() => {
@@ -136,9 +196,20 @@ export default function App() {
   const [patients, setPatients] = useState<Patient[]>(() => {
     const saved = localStorage.getItem('tb_care_patients_v4');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return INITIAL_PATIENTS; }
+      try { 
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map(p => ({
+            ...p,
+            status: normalizePatientStatus(p.status)
+          }));
+        }
+      } catch (e) { return INITIAL_PATIENTS; }
     }
-    return INITIAL_PATIENTS;
+    return INITIAL_PATIENTS.map(p => ({
+      ...p,
+      status: normalizePatientStatus(p.status)
+    }));
   });
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>(() => {
     const saved = localStorage.getItem('tb_care_logs_v4');
@@ -167,6 +238,18 @@ export default function App() {
       try { return JSON.parse(saved); } catch (e) { return INITIAL_FOLLOWUPS; }
     }
     return INITIAL_FOLLOWUPS;
+  });
+  const [healthcareWorkers, setHealthcareWorkers] = useState<HealthcareWorker[]>(() => {
+    const saved = localStorage.getItem('tb_care_hcw_v1');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        return INITIAL_HEALTHCARE_WORKERS;
+      }
+    }
+    return INITIAL_HEALTHCARE_WORKERS;
   });
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [statusNotification, setStatusNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -204,7 +287,8 @@ export default function App() {
                   investigations,
                   contacts,
                   followUps,
-                  logs: dailyLogs
+                  logs: dailyLogs,
+                  healthcareWorkers
                 });
                 setLastSyncTime(new Date());
               } catch (e: any) {
@@ -221,7 +305,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isAutoSyncEnabled, spreadsheetId, token, isAutoSyncing, isDataLoading, patients, investigations, contacts, followUps, dailyLogs]);
+  }, [isAutoSyncEnabled, spreadsheetId, token, isAutoSyncing, isDataLoading, patients, investigations, contacts, followUps, dailyLogs, healthcareWorkers]);
 
   // Sync to local storage
   useEffect(() => {
@@ -239,9 +323,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('tb_care_followups_v4', JSON.stringify(followUps));
   }, [followUps]);
+  useEffect(() => {
+    localStorage.setItem('tb_care_hcw_v1', JSON.stringify(healthcareWorkers));
+  }, [healthcareWorkers]);
 
   // UI Navigation & Modals
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'patients' | 'contacts' | 'analytics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'patients' | 'contacts' | 'hcw' | 'analytics'>('dashboard');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -268,6 +355,9 @@ export default function App() {
   const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
   const [followUpTargetContact, setFollowUpTargetContact] = useState<ContactPerson | null>(null);
   const [followUpDefaultStep, setFollowUpDefaultStep] = useState<ContactFollowUp['stepType'] | undefined>(undefined);
+
+  // Healthcare Workers (บุคลากรทางการแพทย์)
+  const [isHcwModalOpen, setIsHcwModalOpen] = useState(false);
 
   // Notification helper
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -389,16 +479,18 @@ export default function App() {
         fetchedLogs, 
         fetchedInvestigations, 
         fetchedContacts, 
-        fetchedFollowUps
+        fetchedFollowUps,
+        fetchedHcw
       ] = await Promise.all([
         fetchAllPatients(activeToken, spreadsheetId),
         fetchAllDailyLogs(activeToken, spreadsheetId),
         fetchAllInvestigations(activeToken, spreadsheetId),
         fetchAllContacts(activeToken, spreadsheetId),
         fetchAllFollowUps(activeToken, spreadsheetId),
+        fetchAllHealthcareWorkers(activeToken, spreadsheetId),
       ]);
 
-      if (fetchedPatients.length > 0 || fetchedContacts.length > 0 || fetchedLogs.length > 0) {
+      if (fetchedPatients.length > 0 || fetchedContacts.length > 0 || fetchedLogs.length > 0 || fetchedHcw.length > 0) {
         // Reconcile patient contact numbers accurately with investigation forms & registered contacts
         const reconciledPatients = fetchedPatients.map(p => {
           const inv = fetchedInvestigations.find(i => i.patientId === p.id || (i.patientHN && p.hn && i.patientHN.toLowerCase() === p.hn.toLowerCase()));
@@ -408,8 +500,13 @@ export default function App() {
           
           return {
             ...p,
-            householdContactsCount: inv ? inv.householdContactsCount : (regHousehold > 0 ? regHousehold : p.householdContactsCount),
-            nonHouseholdContactsCount: inv ? inv.nonHouseholdContactsCount : (regNonHousehold > 0 ? regNonHousehold : p.nonHouseholdContactsCount),
+            status: normalizePatientStatus(p.status),
+            householdContactsCount: inv?.householdContactsCount !== undefined && inv.householdContactsCount !== null 
+              ? Number(inv.householdContactsCount) || 0 
+              : Math.max(Number(p.householdContactsCount) || 0, regHousehold),
+            nonHouseholdContactsCount: inv?.nonHouseholdContactsCount !== undefined && inv.nonHouseholdContactsCount !== null
+              ? Number(inv.nonHouseholdContactsCount) || 0 
+              : Math.max(Number(p.nonHouseholdContactsCount) || 0, regNonHousehold),
             investigationStatus: inv ? 'completed' : p.investigationStatus,
           };
         });
@@ -419,13 +516,16 @@ export default function App() {
         setInvestigations(fetchedInvestigations);
         setContacts(fetchedContacts);
         setFollowUps(fetchedFollowUps);
+        if (fetchedHcw.length > 0) {
+          setHealthcareWorkers(fetchedHcw);
+        }
         
         // Update selected patient if currently viewing
         if (selectedPatient) {
           const updated = reconciledPatients.find(p => p.id === selectedPatient.id);
           if (updated) setSelectedPatient(updated);
         }
-        showToast('success', `ซิงค์ข้อมูลจาก Google Sheet สำเร็จ (${reconciledPatients.length} ผู้ป่วย, ${fetchedContacts.length} ผู้สัมผัส, ${fetchedLogs.length} บันทึกยา)`);
+        showToast('success', `ซิงค์ข้อมูลจาก Google Sheet สำเร็จ (${reconciledPatients.length} ผู้ป่วย, ${fetchedContacts.length} ผู้สัมผัส, ${fetchedHcw.length} บุคลากร)`);
       } else {
         showToast('success', 'เชื่อมต่อ Google Sheet สำเร็จ (ยังไม่มีข้อมูลในชีท หรือเป็นชีทใหม่)');
       }
@@ -455,13 +555,14 @@ export default function App() {
       );
 
       // If new sheet and local data exists, push all data
-      if (sheet.isNew && (patients.length > 0 || contacts.length > 0)) {
+      if (sheet.isNew && (patients.length > 0 || contacts.length > 0 || healthcareWorkers.length > 0)) {
         await pushAllLocalDataToSheet(activeToken, sheet.spreadsheetId, {
           patients,
           investigations,
           contacts,
           followUps,
-          logs: dailyLogs
+          logs: dailyLogs,
+          healthcareWorkers
         });
       } else {
         await loadSheetData();
@@ -471,7 +572,7 @@ export default function App() {
     } finally {
       setIsDataLoading(false);
     }
-  }, [patients, contacts, investigations, followUps, dailyLogs, loadSheetData]);
+  }, [patients, contacts, investigations, followUps, dailyLogs, healthcareWorkers, loadSheetData]);
 
   useEffect(() => {
     if (token) {
@@ -530,9 +631,10 @@ export default function App() {
         investigations,
         contacts,
         followUps,
-        logs: dailyLogs
+        logs: dailyLogs,
+        healthcareWorkers
       });
-      showToast('success', `ส่งข้อมูลทั้งหมดขึ้น Google Sheet สำเร็จแล้ว (${patients.length} ผู้ป่วย, ${contacts.length} ผู้สัมผัส, ${dailyLogs.length} บันทึกยา)`);
+      showToast('success', `ส่งข้อมูลทั้งหมดขึ้น Google Sheet สำเร็จแล้ว (${patients.length} ผู้ป่วย, ${contacts.length} ผู้สัมผัส, ${healthcareWorkers.length} บุคลากร, ${dailyLogs.length} บันทึกยา)`);
     } catch (err: any) {
       console.error('Error pushing data to sheet:', err);
       showToast('error', `ไม่สามารถส่งข้อมูลขึ้น Google Sheet ได้: ${err.message}`);
@@ -543,12 +645,16 @@ export default function App() {
 
   // 1. Save/Update Patient (Auto-syncs to Google Sheet)
   const handleSavePatient = async (patientData: Patient) => {
-    const isEdit = patients.some(p => p.id === patientData.id);
+    const cleanPatient: Patient = {
+      ...patientData,
+      status: normalizePatientStatus(patientData.status),
+    };
+    const isEdit = patients.some(p => p.id === cleanPatient.id);
     if (isEdit) {
-      setPatients(prev => prev.map(p => p.id === patientData.id ? patientData : p));
-      if (selectedPatient?.id === patientData.id) setSelectedPatient(patientData);
+      setPatients(prev => prev.map(p => p.id === cleanPatient.id ? cleanPatient : p));
+      if (selectedPatient?.id === cleanPatient.id) setSelectedPatient(cleanPatient);
     } else {
-      setPatients(prev => [patientData, ...prev]);
+      setPatients(prev => [cleanPatient, ...prev]);
     }
 
     let activeToken = token;
@@ -577,7 +683,7 @@ export default function App() {
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
     } else if (spreadsheetId && !activeToken) {
-      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
+      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "จัดการระบบ & แอดมิน" ด้านบน`);
     } else {
       showToast('success', `บันทึกข้อมูลผู้ป่วย ${patientData.fullName} (HN: ${patientData.hn}) เรียบร้อยแล้ว`);
     }
@@ -632,7 +738,7 @@ export default function App() {
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
     } else if (spreadsheetId && !activeToken) {
-      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
+      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "จัดการระบบ & แอดมิน" ด้านบน`);
     } else {
       showToast('success', `บันทึกการทานยาวันที่ ${logData.date} เรียบร้อยแล้ว`);
     }
@@ -685,7 +791,7 @@ export default function App() {
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
     } else if (spreadsheetId && !activeToken) {
-      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
+      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "จัดการระบบ & แอดมิน" ด้านบน`);
     } else {
       showToast('success', `บันทึกใบสอบสวนโรคผู้ป่วย ${invData.patientName} เรียบร้อยแล้ว`);
     }
@@ -743,7 +849,7 @@ export default function App() {
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
     } else if (spreadsheetId && !activeToken) {
-      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
+      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "จัดการระบบ & แอดมิน" ด้านบน`);
     } else {
       showToast('success', `บันทึกข้อมูลผู้สัมผัส ${contactData.fullName} เรียบร้อยแล้ว`);
     }
@@ -854,7 +960,7 @@ export default function App() {
         showToast('error', `บันทึกในระบบแล้ว แต่ไม่สามารถเขียนลง Google Sheet ได้ (${err.message}) กรุณากด "เชื่อมต่อสิทธิ์ Google" ด้านบน`);
       }
     } else if (spreadsheetId && !activeToken) {
-      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "เชื่อมต่อสิทธิ์ Google" ที่แถบด้านบน`);
+      showToast('error', `บันทึกข้อมูลในระบบแล้ว แต่ยังไม่สามารถส่งเข้า Google Sheet ได้เนื่องจากสิทธิ์ Google OAuth หมดอายุ กรุณากด "จัดการระบบ & แอดมิน" ด้านบน`);
     } else {
       showToast('success', `บันทึกผลการตรวจ (${followUpData.stepType}) เรียบร้อยแล้ว`);
     }
@@ -868,15 +974,19 @@ export default function App() {
     setPatients(prev => {
       const copy = [...prev];
       importedPatients.forEach(newP => {
+        const normalized: Patient = {
+          ...newP,
+          status: normalizePatientStatus(newP.status),
+        };
         const existingIdx = copy.findIndex(
-          p => (p.hn && newP.hn && p.hn.toLowerCase() === newP.hn.toLowerCase()) ||
-               (p.nationalId && newP.nationalId && p.nationalId === newP.nationalId) ||
-               p.id === newP.id
+          p => (p.hn && normalized.hn && p.hn.toLowerCase() === normalized.hn.toLowerCase()) ||
+               (p.nationalId && normalized.nationalId && p.nationalId === normalized.nationalId) ||
+               p.id === normalized.id
         );
         if (existingIdx >= 0) {
-          copy[existingIdx] = { ...copy[existingIdx], ...newP, id: copy[existingIdx].id };
+          copy[existingIdx] = { ...copy[existingIdx], ...normalized, id: copy[existingIdx].id };
         } else {
-          copy.unshift(newP);
+          copy.unshift(normalized);
         }
       });
       return copy;
@@ -984,6 +1094,7 @@ export default function App() {
     setInvestigations([]);
     setContacts([]);
     setFollowUps([]);
+    setHealthcareWorkers([]);
     setSelectedPatient(null);
 
     localStorage.removeItem('tb_care_patients_v4');
@@ -991,11 +1102,12 @@ export default function App() {
     localStorage.removeItem('tb_care_inv_v4');
     localStorage.removeItem('tb_care_contacts_v4');
     localStorage.removeItem('tb_care_followups_v4');
+    localStorage.removeItem('tb_care_hcw_v1');
 
     if (token && spreadsheetId) {
       try {
         await clearAllSheetData(token, spreadsheetId);
-        showToast('success', 'ลบรายชื่อผู้ป่วยและกลุ่มเสี่ยงทั้งหมดออกจากระบบและ Google Sheet เรียบร้อยแล้ว พร้อมสำหรับการกรอกข้อมูลใหม่');
+        showToast('success', 'ลบรายชื่อผู้ป่วย กลุ่มเสี่ยง และบุคลากรทั้งหมดออกจากระบบและ Google Sheet เรียบร้อยแล้ว');
       } catch (err: any) {
         console.error('Clear all sheets error:', err);
         showToast('success', 'ลบข้อมูลทั้งหมดในระบบเรียบร้อยแล้ว พร้อมสำหรับการกรอกข้อมูลใหม่');
@@ -1003,6 +1115,194 @@ export default function App() {
     } else {
       showToast('success', 'ลบข้อมูลทั้งหมดในระบบเรียบร้อยแล้ว พร้อมสำหรับการกรอกข้อมูลใหม่');
     }
+  };
+
+  // ==========================================
+  // HEALTHCARE WORKERS HANDLERS (บุคลากรทางการแพทย์)
+  // ==========================================
+
+  // 1. Save or Update Healthcare Worker
+  const handleSaveHcw = async (workerData: HealthcareWorker) => {
+    const isEdit = healthcareWorkers.some(w => w.id === workerData.id);
+    let updatedList: HealthcareWorker[] = [];
+
+    if (isEdit) {
+      updatedList = healthcareWorkers.map(w => w.id === workerData.id ? workerData : w);
+    } else {
+      updatedList = [workerData, ...healthcareWorkers];
+    }
+    setHealthcareWorkers(updatedList);
+
+    // Auto sync to sheet
+    let activeToken = token;
+    if (activeToken && spreadsheetId) {
+      try {
+        await saveHealthcareWorkerToSheet(activeToken, spreadsheetId, workerData);
+        showToast('success', `${isEdit ? 'อัปเดต' : 'เพิ่ม'}ข้อมูลบุคลากร ${workerData.fullName} และบันทึกลง Google Sheet สำเร็จ`);
+      } catch (err: any) {
+        console.error('Save HCW sheet error:', err);
+        showToast('success', `บันทึกข้อมูลบุคลากร ${workerData.fullName} ในระบบเรียบร้อย`);
+      }
+    } else {
+      showToast('success', `บันทึกข้อมูลบุคลากร ${workerData.fullName} เรียบร้อยแล้ว`);
+    }
+  };
+
+  // 2. Add repeated CXR record to Healthcare Worker (เพิ่มการเอเรย์ได้เรื่อยๆ)
+  const handleSaveHcwCxr = async (workerId: string, recordData: Omit<HcwCxrRecord, 'id' | 'createdAt'>) => {
+    const target = healthcareWorkers.find(w => w.id === workerId);
+    if (!target) return;
+
+    const newCxrRecord: HcwCxrRecord = {
+      ...recordData,
+      id: `CXR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const existingRecords = target.cxrRecords || [];
+    const updatedRecords = [newCxrRecord, ...existingRecords];
+
+    const updatedWorker: HealthcareWorker = {
+      ...target,
+      cxrRecords: updatedRecords,
+      updatedAt: new Date().toISOString(),
+      lastUpdatedBy: currentUserProfile?.name || currentUserProfile?.email || 'เจ้าหน้าที่'
+    };
+
+    const updatedList = healthcareWorkers.map(w => w.id === workerId ? updatedWorker : w);
+    setHealthcareWorkers(updatedList);
+
+    // Auto sync to sheet
+    let activeToken = token;
+    if (activeToken && spreadsheetId) {
+      try {
+        await saveHealthcareWorkerToSheet(activeToken, spreadsheetId, updatedWorker);
+        showToast('success', `บันทึกผลการตรวจ CXR ครั้งที่ ${updatedRecords.length} ของ ${target.fullName} และซิงค์ลงชีทสำเร็จ`);
+      } catch (err: any) {
+        console.error('Save HCW CXR sheet error:', err);
+        showToast('success', `บันทึกผลการตรวจ CXR ครั้งที่ ${updatedRecords.length} ในระบบเรียบร้อย`);
+      }
+    } else {
+      showToast('success', `บันทึกผลการตรวจ CXR ครั้งที่ ${updatedRecords.length} ของ ${target.fullName} เรียบร้อยแล้ว`);
+    }
+  };
+
+  // 3. Delete a specific CXR record from Healthcare Worker
+  const handleDeleteHcwCxr = async (workerId: string, recordId: string) => {
+    const target = healthcareWorkers.find(w => w.id === workerId);
+    if (!target) return;
+
+    const updatedRecords = (target.cxrRecords || []).filter(r => r.id !== recordId);
+    const updatedWorker: HealthcareWorker = {
+      ...target,
+      cxrRecords: updatedRecords,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setHealthcareWorkers(prev => prev.map(w => w.id === workerId ? updatedWorker : w));
+
+    if (token && spreadsheetId) {
+      try {
+        await saveHealthcareWorkerToSheet(token, spreadsheetId, updatedWorker);
+      } catch (e) {
+        // continue
+      }
+    }
+    showToast('success', 'ลบประวัติการตรวจ CXR เรียบร้อย');
+  };
+
+  // 4. Mark Healthcare Worker as Resigned / Retired (ปุ่มกดลาออกเพื่อทำเป็นฐานข้อมูลไว้)
+  const handleResignWorker = async (
+    workerId: string, 
+    statusOrData: HealthcareWorker['status'] | {
+      status: HealthcareWorker['status'];
+      resignationDate: string;
+      resignationReason?: string;
+      resignationNotes?: string;
+    },
+    resignationDate?: string,
+    resignationReason?: string,
+    resignationNotes?: string
+  ) => {
+    const target = healthcareWorkers.find(w => w.id === workerId);
+    if (!target) return;
+
+    const status = typeof statusOrData === 'object' ? statusOrData.status : statusOrData;
+    const resDate = typeof statusOrData === 'object' ? statusOrData.resignationDate : (resignationDate || new Date().toISOString().split('T')[0]);
+    const resReason = typeof statusOrData === 'object' ? statusOrData.resignationReason : (resignationReason || '');
+    const resNotes = typeof statusOrData === 'object' ? statusOrData.resignationNotes : (resignationNotes || '');
+
+    const updatedWorker: HealthcareWorker = {
+      ...target,
+      status,
+      resignationDate: resDate,
+      resignationReason: resReason,
+      resignationNotes: resNotes,
+      updatedAt: new Date().toISOString(),
+      lastUpdatedBy: currentUserProfile?.name || currentUserProfile?.email || 'เจ้าหน้าที่'
+    };
+
+    setHealthcareWorkers(prev => prev.map(w => w.id === workerId ? updatedWorker : w));
+
+    const statusLabels: Record<string, string> = {
+      resigned: 'ลาออก',
+      retired: 'เกษียณอายุ',
+      transferred: 'ย้ายหน่วยงาน',
+      leave_of_absence: 'พักงาน/ลาพัก'
+    };
+
+    if (token && spreadsheetId) {
+      try {
+        await saveHealthcareWorkerToSheet(token, spreadsheetId, updatedWorker);
+        showToast('success', `บันทึกสถานะ${statusLabels[status] || ''}ของ ${target.fullName} เก็บไว้ในฐานข้อมูลประวัติและ Google Sheet เรียบร้อยแล้ว`);
+      } catch (err: any) {
+        showToast('success', `บันทึกสถานะ${statusLabels[status] || ''}ของ ${target.fullName} เก็บไว้ในฐานข้อมูลเรียบร้อยแล้ว`);
+      }
+    } else {
+      showToast('success', `บันทึกสถานะ${statusLabels[status] || ''}ของ ${target.fullName} เก็บไว้ในฐานข้อมูลเรียบร้อยแล้ว`);
+    }
+  };
+
+  // 5. Reactivate Healthcare Worker
+  const handleReactivateWorker = async (workerId: string) => {
+    const target = healthcareWorkers.find(w => w.id === workerId);
+    if (!target) return;
+
+    const updatedWorker: HealthcareWorker = {
+      ...target,
+      status: 'active',
+      resignationDate: undefined,
+      resignationReason: undefined,
+      resignationNotes: undefined,
+      updatedAt: new Date().toISOString(),
+      lastUpdatedBy: currentUserProfile?.name || currentUserProfile?.email || 'เจ้าหน้าที่'
+    };
+
+    setHealthcareWorkers(prev => prev.map(w => w.id === workerId ? updatedWorker : w));
+
+    if (token && spreadsheetId) {
+      try {
+        await saveHealthcareWorkerToSheet(token, spreadsheetId, updatedWorker);
+      } catch (e) {
+        // continue
+      }
+    }
+    showToast('success', `คืนสถานะการปฏิบัติงาน (Active) ให้ ${target.fullName} เรียบร้อยแล้ว`);
+  };
+
+  // 6. Delete Healthcare Worker permanently
+  const handleDeleteHcw = async (workerId: string) => {
+    const target = healthcareWorkers.find(w => w.id === workerId);
+    setHealthcareWorkers(prev => prev.filter(w => w.id !== workerId));
+
+    if (token && spreadsheetId) {
+      try {
+        await deleteHealthcareWorkerFromSheet(token, spreadsheetId, workerId);
+      } catch (e) {
+        // continue
+      }
+    }
+    showToast('success', `ลบข้อมูล ${target?.fullName || ''} ออกจากระบบเรียบร้อย`);
   };
 
   return (
@@ -1028,7 +1328,50 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             {currentUser ? (
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2">
+                {/* Privacy / Masking Quick Toggle */}
+                <button
+                  onClick={() => handleToggleMasking()}
+                  className={`px-2.5 py-1.5 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                    isDataMaskingEnabled
+                      ? 'bg-teal-700 text-white border-teal-800'
+                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                  }`}
+                  title={isDataMaskingEnabled ? 'โหมดพรางข้อมูล PDPA เปิดอยู่ (คลิกเพื่อแสดงข้อมูลเต็ม)' : 'คลิกเพื่อเปิดโหมดพรางข้อมูลอ่อนไหว (PDPA Privacy Mode)'}
+                >
+                  {isDataMaskingEnabled ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-slate-500" />}
+                  <span className="hidden lg:inline">{isDataMaskingEnabled ? 'พรางข้อมูล: เปิด' : 'พรางข้อมูล'}</span>
+                </button>
+
+                {/* Security & Backend Admin Button */}
+                {/* Quick Sheet Sync button if connected */}
+                {spreadsheetId && (
+                  <button
+                    onClick={loadSheetData}
+                    disabled={isDataLoading || isAutoSyncing}
+                    className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                    title={lastSyncTime ? `ซิงค์กับ Google Sheet เรียบร้อย (${lastSyncTime.toLocaleTimeString('th-TH')}) คลิกเพื่อดึงข้อมูลล่าสุด` : 'คลิกเพื่อซิงค์ข้อมูลกับ Google Sheet'}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-teal-600 ${isDataLoading || isAutoSyncing ? 'animate-spin' : ''}`} />
+                    <span className="hidden xl:inline text-slate-700">
+                      {isAutoSyncing ? 'กำลังซิงค์...' : 'ซิงค์ Sheet'}
+                    </span>
+                  </button>
+                )}
+
+                {/* Security & Backend Admin Button */}
+                <button
+                  onClick={() => {
+                    setAdminModalDefaultTab('security');
+                    setIsBackendAdminModalOpen(true);
+                  }}
+                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 hover:text-emerald-950 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="เปิดศูนย์ความปลอดภัย นโยบายจัดเก็บข้อมูล PDPA และจัดการระบบหลังบ้าน"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                  <span className="hidden sm:inline">ความปลอดภัย & แอดมิน</span>
+                </button>
+
                 {/* Switch User Button */}
                 <button
                   onClick={() => setIsLoginModalOpen(true)}
@@ -1112,28 +1455,6 @@ export default function App() {
           </div>
         ) : (
           <div>
-            {/* Google Sheets Connection Banner */}
-            <SheetConfigBanner
-              accessToken={token}
-              spreadsheetId={spreadsheetId}
-              spreadsheetUrl={spreadsheetUrl}
-              spreadsheetName={spreadsheetName}
-              onConfigChange={handleConfigChange}
-              onRefreshData={loadSheetData}
-              onPushAllData={handlePushAllToSheet}
-              onOpenImportModal={(mode) => {
-                setImportModalMode(mode);
-                setIsImportModalOpen(true);
-              }}
-              isLoading={isDataLoading}
-              onTokenUpdate={(newToken) => setToken(newToken)}
-              isAutoSyncEnabled={isAutoSyncEnabled}
-              onToggleAutoSync={(enabled) => setIsAutoSyncEnabled(enabled)}
-              lastSyncTime={lastSyncTime}
-              nextSyncCountdown={nextSyncCountdown}
-              isAutoSyncing={isAutoSyncing}
-            />
-
             {/* Primary Navigation Tabs - Always Accessible */}
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-3">
               <div className="flex flex-wrap gap-2">
@@ -1189,7 +1510,7 @@ export default function App() {
                   }`}
                 >
                   <HeartHandshake className="w-4 h-4 text-emerald-500" />
-                  <span>แถบการติดตามกลุ่มเสี่ยง (Contact Tracing)</span>
+                  <span>ติดตามกลุ่มเสี่ยง (Contact Tracing)</span>
                   <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                     activeTab === 'contacts' && !selectedPatient
                       ? 'bg-white/20 text-white'
@@ -1198,32 +1519,74 @@ export default function App() {
                     {contacts.length}
                   </span>
                 </button>
+
+                {/* 4. Healthcare Workers Screening Tab (การคัดกรองในบุคลากรทางการแพทย์) */}
+                <button
+                  onClick={() => {
+                    setActiveTab('hcw');
+                    setSelectedPatient(null);
+                  }}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                    activeTab === 'hcw' && !selectedPatient
+                      ? 'bg-teal-800 text-white shadow-xs'
+                      : 'bg-white text-slate-700 hover:bg-teal-50 hover:text-teal-900 border border-slate-200/80'
+                  }`}
+                >
+                  <Stethoscope className="w-4 h-4 text-teal-600" />
+                  <span>คัดกรองบุคลากรทางการแพทย์</span>
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    activeTab === 'hcw' && !selectedPatient
+                      ? 'bg-white/20 text-white'
+                      : 'bg-teal-100 text-teal-800'
+                  }`}>
+                    {healthcareWorkers.filter(w => w.status === 'active').length}
+                  </span>
+                  {healthcareWorkers.some(w => w.status !== 'active') && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold" title="ผู้ที่ลาออกแล้วในฐานข้อมูล">
+                      {healthcareWorkers.filter(w => w.status !== 'active').length} ลาออก
+                    </span>
+                  )}
+                </button>
               </div>
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setEditingContact(null);
-                    setContactDefaultPatient(null);
-                    setIsContactModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>เพิ่มผู้สัมผัสโรค</span>
-                </button>
+                {activeTab === 'hcw' ? (
+                  <button
+                    onClick={() => {
+                      setIsHcwModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>เพิ่มบุคลากร</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditingContact(null);
+                        setContactDefaultPatient(null);
+                        setIsContactModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>เพิ่มผู้สัมผัสโรค</span>
+                    </button>
 
-                <button
-                  onClick={() => {
-                    setEditingPatient(null);
-                    setIsPatientModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>ลงทะเบียนผู้ป่วยใหม่</span>
-                </button>
+                    <button
+                      onClick={() => {
+                        setEditingPatient(null);
+                        setIsPatientModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>ลงทะเบียนผู้ป่วยใหม่</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1292,6 +1655,7 @@ export default function App() {
                 spreadsheetUrl={spreadsheetUrl}
                 currentUserProfile={currentUserProfile}
                 onDeletePatient={handleDeletePatient}
+                isMaskingEnabled={isDataMaskingEnabled}
               />
             ) : activeTab === 'patients' ? (
               <PatientList
@@ -1321,6 +1685,8 @@ export default function App() {
                   setImportModalMode(mode);
                   setIsImportModalOpen(true);
                 }}
+                isMaskingEnabled={isDataMaskingEnabled}
+                onToggleMasking={handleToggleMasking}
               />
             ) : activeTab === 'contacts' ? (
               <ContactsView
@@ -1350,12 +1716,33 @@ export default function App() {
                   setIsImportModalOpen(true);
                 }}
               />
+            ) : activeTab === 'hcw' ? (
+              <HealthcareWorkersView
+                workers={healthcareWorkers}
+                currentUserProfile={currentUserProfile}
+                spreadsheetUrl={spreadsheetUrl}
+                onSaveWorker={handleSaveHcw}
+                onSaveCxr={handleSaveHcwCxr}
+                onResignWorker={handleResignWorker}
+                onReactivateWorker={handleReactivateWorker}
+                onDeleteWorker={handleDeleteHcw}
+                onDeleteCxrRecord={handleDeleteHcwCxr}
+                onResetInitialData={() => {
+                  setHealthcareWorkers(INITIAL_HEALTHCARE_WORKERS);
+                  localStorage.setItem('tb_care_hcw_v1', JSON.stringify(INITIAL_HEALTHCARE_WORKERS));
+                  showToast('success', 'โหลดข้อมูลตัวอย่างบุคลากรทางการแพทย์เรียบร้อยแล้ว (10 ท่าน)');
+                }}
+                isExternalAddModalOpen={isHcwModalOpen}
+                onExternalAddModalClosed={() => setIsHcwModalOpen(false)}
+              />
             ) : (
               <AnalyticsDashboard 
                 patients={patients} 
                 logs={dailyLogs}
                 contacts={contacts}
                 followUps={followUps}
+                investigations={investigations}
+                healthcareWorkers={healthcareWorkers}
                 currentUserProfile={currentUserProfile}
                 spreadsheetId={spreadsheetId}
                 spreadsheetUrl={spreadsheetUrl}
@@ -1474,7 +1861,50 @@ export default function App() {
               setImportModalMode(mode);
               setIsImportModalOpen(true);
             }}
+            defaultTab={adminModalDefaultTab}
+            isMaskingEnabled={isDataMaskingEnabled}
+            onToggleMasking={handleToggleMasking}
+            autoLockMinutes={autoLockMinutes}
+            onSetAutoLockMinutes={(min) => {
+              setAutoLockMinutesState(min);
+              setAutoLockMinutes(min);
+            }}
+            onLockScreenNow={() => {
+              setIsBackendAdminModalOpen(false);
+              setIsScreenLocked(true);
+            }}
           />
+        )}
+
+        {/* Screen Lock Overlay for Security / PDPA compliance */}
+        {isScreenLocked && (
+          <div className="fixed inset-0 z-50 bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+              <div className="w-14 h-14 rounded-2xl bg-teal-100 text-teal-800 flex items-center justify-center mx-auto shadow-inner">
+                <Lock className="w-7 h-7" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">ล็อกหน้าจอเพื่อความปลอดภัย (Session Locked)</h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  ระบบล็อกหน้าจออัตโนมัติเพื่อปกป้องข้อมูลผู้ป่วยตามข้อกำหนด PDPA ของโรงพยาบาล
+                </p>
+              </div>
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-left">
+                <div className="font-bold text-slate-800">{currentUserProfile?.name || currentUser?.displayName || 'เจ้าหน้าที่'}</div>
+                <div className="text-[11px] text-slate-500">{currentUserProfile?.position || 'รพ.มหาวิทยาลัยอุบลราชธานี'}</div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsScreenLocked(false);
+                  showToast('success', 'ปลดล็อกหน้าจอเรียบร้อยแล้ว');
+                }}
+                className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Unlock className="w-4 h-4" />
+                <span>ปลดล็อกหน้าจอเพื่อทำงานต่อ</span>
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Modal: Import Patients & Contacts from Google Sheets */}

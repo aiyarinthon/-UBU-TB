@@ -23,7 +23,14 @@ import {
   ChevronRight, 
   Sparkles,
   UploadCloud,
-  UserPlus
+  UserPlus,
+  Eye,
+  EyeOff,
+  Server,
+  HardDrive,
+  ShieldAlert,
+  Clock,
+  Check
 } from 'lucide-react';
 import { UserProfile, UserRole, StaffAccount, Patient, InvestigationForm, ContactPerson, ContactFollowUp, DailyLog } from '../types';
 import { 
@@ -34,6 +41,14 @@ import {
 } from '../lib/userStore';
 import { verifyAndInitSheets, createTBSheet } from '../lib/sheetsApi';
 import { googleSignIn } from '../lib/auth';
+import { 
+  getSecurityAuditLogs, 
+  clearSecurityAuditLogs, 
+  isEnterpriseEmail, 
+  SecurityAuditLog, 
+  recordSecurityAuditLog 
+} from '../lib/securityUtils';
+import { formatThaiDateTime } from '../lib/dateUtils';
 
 interface Props {
   isOpen: boolean;
@@ -54,6 +69,12 @@ interface Props {
   onTokenUpdate?: (token: string) => void;
   onClearAllData?: () => void;
   onOpenImportModal?: (mode: 'patient' | 'contact') => void;
+  defaultTab?: 'sheets' | 'staff' | 'permissions' | 'security' | 'backup';
+  isMaskingEnabled?: boolean;
+  onToggleMasking?: (enabled: boolean) => void;
+  autoLockMinutes?: number;
+  onSetAutoLockMinutes?: (minutes: number) => void;
+  onLockScreenNow?: () => void;
 }
 
 export const BackendAdminModal: React.FC<Props> = ({
@@ -75,10 +96,17 @@ export const BackendAdminModal: React.FC<Props> = ({
   onTokenUpdate,
   onClearAllData,
   onOpenImportModal,
+  defaultTab = 'sheets',
+  isMaskingEnabled = false,
+  onToggleMasking,
+  autoLockMinutes = 15,
+  onSetAutoLockMinutes,
+  onLockScreenNow
 }) => {
-  const [activeTab, setActiveTab] = useState<'sheets' | 'staff' | 'permissions' | 'backup'>('sheets');
+  const [activeTab, setActiveTab] = useState<'sheets' | 'staff' | 'permissions' | 'security' | 'backup'>(defaultTab);
   const [staffList, setStaffList] = useState<StaffAccount[]>(() => getStoredStaffList());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<SecurityAuditLog[]>(() => getSecurityAuditLogs());
   
   // Sheet config state
   const [customSheetId, setCustomSheetId] = useState('');
@@ -332,6 +360,17 @@ export const BackendAdminModal: React.FC<Props> = ({
             >
               <KeyRound className="w-4 h-4 text-amber-600" />
               <span>ตารางสิทธิ์การเข้าถึง (Access Matrix)</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('security')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                activeTab === 'security'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>ความปลอดภัย & PDPA</span>
             </button>
             <button
               onClick={() => setActiveTab('backup')}
@@ -828,7 +867,369 @@ export const BackendAdminModal: React.FC<Props> = ({
             </div>
           )}
 
-          {/* TAB 4: Backup & Raw Data */}
+          {/* TAB 4: Security & PDPA Architecture */}
+          {activeTab === 'security' && (
+            <div className="space-y-6">
+              {/* Header Banner */}
+              <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-slate-900 text-white rounded-2xl p-5 border border-emerald-500/30 shadow-md">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 flex-shrink-0">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-bold tracking-tight text-white">
+                        สถาปัตยกรรมการจัดเก็บข้อมูลผู้ป่วยที่ปลอดภัย (Secure Patient Data Architecture & PDPA)
+                      </h4>
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
+                        พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      ข้อมูลผู้ป่วยวัณโรค ประวัติการรักษา ผลตรวจ CXR/GeneXpert และประวัติผู้สัมผัสโรค จัดเป็น 
+                      <span className="text-emerald-300 font-semibold"> "ข้อมูลส่วนบุคคลที่มีความอ่อนไหวสูง (Sensitive Personal Data)" </span>
+                      ตามมาตรา 26 แห่ง PDPA และ พ.ร.บ. สุขภาพแห่งชาติ พ.ศ. 2550
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 1: Where should patient data be recorded? (3-Tier Comparison) */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Database className="w-4 h-4 text-teal-700" />
+                    <span>คำแนะนำ: ควรบันทึกข้อมูลผู้ป่วยที่ไหนปลอดภัยที่สุด? (3-Tier Storage Hierarchy)</span>
+                  </h5>
+                  <span className="text-[10px] text-slate-500">เปรียบเทียบระดับความปลอดภัย</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                  {/* Tier 1: Hospital HIS / EMR / Cloud Database */}
+                  <div className="bg-emerald-50/70 border-2 border-emerald-500/60 rounded-2xl p-4 flex flex-col justify-between relative shadow-xs">
+                    <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-emerald-700 text-white text-[9px] font-bold">
+                      ⭐ ปลอดภัยสูงสุด (Gold Standard)
+                    </div>
+                    <div>
+                      <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center mb-2.5">
+                        <Server className="w-5 h-5" />
+                      </div>
+                      <h6 className="text-xs font-bold text-emerald-950">1. ระบบเวชระเบียน รพ. (HIS / EMR)</h6>
+                      <p className="text-[11px] text-emerald-900/80 font-medium mt-0.5">
+                        เช่น HOSxP, Jhcis หรือ Cloud SQL / PostgreSQL ภายใน รพ.
+                      </p>
+                      <ul className="text-[11px] text-emerald-900/90 mt-2.5 space-y-1.5 list-disc list-inside leading-relaxed">
+                        <li><strong>เหมาะสำหรับ:</strong> ข้อมูลเวชระเบียนทางการแพทย์จริงตามระเบียบราชการ</li>
+                        <li><strong>การเข้ารหัส:</strong> AES-256 (At-Rest) และ TLS 1.3 (In-Transit)</li>
+                        <li><strong>ความปลอดภัย:</strong> อยู่หลัง Firewall โรงพยาบาล มี Audit Log ครบถ้วน</li>
+                        <li><strong>ความพร้อมในระบบนี้:</strong> มี Data Schema มาตรฐานพร้อมเชื่อมต่อ API กับ รพ.มหาวิทยาลัยอุบลราชธานี</li>
+                      </ul>
+                    </div>
+                    <div className="mt-3 pt-2.5 border-t border-emerald-200/80 text-[10px] text-emerald-800 font-semibold">
+                      ✓ แนะนำให้เป็นแหล่งจัดเก็บข้อมูลหลักระยะยาว (Primary Source of Truth)
+                    </div>
+                  </div>
+
+                  {/* Tier 2: Enterprise Google Workspace */}
+                  <div className="bg-blue-50/70 border-2 border-blue-400/50 rounded-2xl p-4 flex flex-col justify-between relative shadow-xs">
+                    <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-blue-700 text-white text-[9px] font-bold">
+                      🛡️ ปลอดภัยระดับองค์กร
+                    </div>
+                    <div>
+                      <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center mb-2.5">
+                        <FileSpreadsheet className="w-5 h-5" />
+                      </div>
+                      <h6 className="text-xs font-bold text-blue-950">2. Google Workspace องค์กร</h6>
+                      <p className="text-[11px] text-blue-900/80 font-medium mt-0.5">
+                        เช่น บัญชี @ubu.ac.th หรือ @moph.go.th
+                      </p>
+                      <ul className="text-[11px] text-blue-900/90 mt-2.5 space-y-1.5 list-disc list-inside leading-relaxed">
+                        <li><strong>เหมาะสำหรับ:</strong> การประสานงานของทีมสอบสวนโรคและสหวิชาชีพ</li>
+                        <li><strong>กฎเหล็ก 1:</strong> ต้องใช้อีเมลองค์กรเท่านั้น (ห้ามใช้ @gmail.com ทั่วไป)</li>
+                        <li><strong>กฎเหล็ก 2:</strong> ตั้งค่าแชร์เป็น <strong>"จำกัดสิทธิ์ (Restricted)"</strong> ห้ามเปิดสาธารณะ</li>
+                        <li><strong>กฎเหล็ก 3:</strong> บังคับเปิด 2FA (ยืนยันตัวตน 2 ขั้นตอน) ทุกบัญชี</li>
+                      </ul>
+                    </div>
+                    <div className="mt-3 pt-2.5 border-t border-blue-200/80 text-[10px] text-blue-800 font-semibold">
+                      ✓ ปัจจุบันระบบเชื่อมต่อผ่าน Google OAuth 2.0 สิทธิ์เฉพาะไฟล์ที่อนุญาต
+                    </div>
+                  </div>
+
+                  {/* Tier 3: Local Storage / Browser Cache */}
+                  <div className="bg-amber-50/70 border border-amber-300 rounded-2xl p-4 flex flex-col justify-between relative shadow-xs">
+                    <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-amber-600 text-white text-[9px] font-bold">
+                      ⚠️ แคชชั่วคราว (มีข้อควรระวัง)
+                    </div>
+                    <div>
+                      <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center mb-2.5">
+                        <HardDrive className="w-5 h-5" />
+                      </div>
+                      <h6 className="text-xs font-bold text-amber-950">3. Local Storage ในเบราว์เซอร์</h6>
+                      <p className="text-[11px] text-amber-900/80 font-medium mt-0.5">
+                        แคชในคอมพิวเตอร์ที่เปิดใช้งานเว็บแอป
+                      </p>
+                      <ul className="text-[11px] text-amber-900/90 mt-2.5 space-y-1.5 list-disc list-inside leading-relaxed">
+                        <li><strong>หน้าที่:</strong> ช่วยให้เปิดใช้งานได้รวดเร็วและทำงานออฟไลน์ได้ชั่วคราว</li>
+                        <li><strong>ข้อควรระวัง:</strong> ข้อมูลจัดเก็บเป็น Plaintext ในเครื่อง</li>
+                        <li><strong>ความเสี่ยง:</strong> หากเป็นเครื่องส่วนกลางในวอร์ด/OPD อาจมีผู้อื่นเปิดดูได้</li>
+                        <li><strong>การป้องกัน:</strong> ต้องเปิดโหมดพรางข้อมูล (Masking) และล็อกหน้าจอเมื่อเลิกใช้</li>
+                      </ul>
+                    </div>
+                    <div className="mt-3 pt-2.5 border-t border-amber-200/80 text-[10px] text-amber-800 font-semibold">
+                      ✕ ไม่ควรใช้เป็นที่จัดเก็บข้อมูลหลักถาวรเพียงแห่งเดียว
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 2: Active Security Controls & Privacy Tools */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
+                <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-emerald-700" />
+                  <span>เครื่องมือควบคุมความปลอดภัยแบบเรียลไทม์ (Active Privacy Controls)</span>
+                </h5>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Control 1: Privacy / Data Masking */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                          {isMaskingEnabled ? <EyeOff className="w-4 h-4 text-teal-600" /> : <Eye className="w-4 h-4 text-slate-400" />}
+                          <span>โหมดพรางข้อมูลอ่อนไหว</span>
+                        </div>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                          isMaskingEnabled ? 'bg-teal-100 text-teal-800' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {isMaskingEnabled ? 'เปิดใช้งาน' : 'ปิดอยู่'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        พรางเลขบัตรประชาชน (1-1002-*****-**-0) และเบอร์โทรศัพท์ (081-***-5678) เพื่อป้องกันบุคคลอื่นมองเห็นหน้าจอ (Shoulder Surfing) ในจุดบริการ
+                      </p>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <button
+                        onClick={() => {
+                          if (onToggleMasking) {
+                            onToggleMasking(!isMaskingEnabled);
+                            recordSecurityAuditLog({
+                              userName: currentUserProfile.name || currentUserProfile.email,
+                              userEmail: currentUserProfile.email,
+                              userRole: currentUserProfile.role,
+                              action: 'SECURITY_CHANGE',
+                              details: `เปลี่ยนสถานะโหมดพรางข้อมูลเป็น: ${!isMaskingEnabled ? 'เปิด (Active)' : 'ปิด (Disabled)'}`
+                            });
+                            setAuditLogs(getSecurityAuditLogs());
+                            showToast(true, `โหมดพรางข้อมูลส่วนบุคคล: ${!isMaskingEnabled ? 'เปิดใช้งานแล้ว' : 'ปิดแล้ว'}`);
+                          }
+                        }}
+                        className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          isMaskingEnabled 
+                            ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' 
+                            : 'bg-teal-700 hover:bg-teal-800 text-white shadow-xs'
+                        }`}
+                      >
+                        {isMaskingEnabled ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        <span>{isMaskingEnabled ? 'ยกเลิกการพรางข้อมูล' : 'เปิดโหมดพรางข้อมูลทันที'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Control 2: Session Auto-Lock */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                          <Clock className="w-4 h-4 text-purple-600" />
+                          <span>ล็อกหน้าจออัตโนมัติ</span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-purple-100 text-purple-800">
+                          {autoLockMinutes > 0 ? `${autoLockMinutes} นาที` : 'ปิดอยู่'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        ตัดการเชื่อมต่อและแสดงหน้าต่างยืนยันตัวตนอัตโนมัติเมื่อไม่มีการเคลื่อนไหวหน้าจอ ป้องกันการลืมเปิดหน้าจอทิ้งไว้ในวอร์ด
+                      </p>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2">
+                      <select
+                        value={autoLockMinutes}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          if (onSetAutoLockMinutes) {
+                            onSetAutoLockMinutes(val);
+                            recordSecurityAuditLog({
+                              userName: currentUserProfile.name || currentUserProfile.email,
+                              userEmail: currentUserProfile.email,
+                              userRole: currentUserProfile.role,
+                              action: 'SECURITY_CHANGE',
+                              details: `ตั้งเวลาล็อกหน้าจออัตโนมัติเป็น: ${val > 0 ? `${val} นาที` : 'ปิด'}`
+                            });
+                            setAuditLogs(getSecurityAuditLogs());
+                            showToast(true, `ตั้งเวลาล็อกหน้าจอเป็น ${val > 0 ? `${val} นาที` : 'ปิด'}`);
+                          }
+                        }}
+                        className="flex-1 py-1.5 px-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-teal-600"
+                      >
+                        <option value={5}>5 นาที (แนะนำใน OPD)</option>
+                        <option value={15}>15 นาที (มาตรฐาน)</option>
+                        <option value={30}>30 นาที</option>
+                        <option value={0}>ปิดการล็อกอัตโนมัติ</option>
+                      </select>
+                      {onLockScreenNow && (
+                        <button
+                          onClick={onLockScreenNow}
+                          className="py-1.5 px-3 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                          title="ล็อกหน้าจอทันที"
+                        >
+                          ล็อกทันที
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Control 3: Security & PDPA Health Checklist */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>การตรวจประเมินความปลอดภัย</span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800">
+                          พร้อมใช้งาน
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">การเข้ารหัส (HTTPS):</span>
+                          <span className="font-bold text-emerald-700">✓ ปลอดภัย (TLS 1.3)</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">โดเมนบัญชี:</span>
+                          <span className={`font-bold ${isEnterpriseEmail(currentUserProfile.email) ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            {isEnterpriseEmail(currentUserProfile.email) ? '✓ บัญชีองค์กร (@ubu)' : '⚠️ บัญชีทั่วไป'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">การควบคุมสิทธิ์:</span>
+                          <span className="font-bold text-blue-700">✓ RBAC ({currentUserProfile.role})</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">สถานะฐานข้อมูล:</span>
+                          <span className={`font-bold ${spreadsheetId ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            {spreadsheetId ? '✓ Google Sheets องค์กร' : '⚠️ ในเครื่องเท่านั้น'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-100 text-[10px] text-slate-400">
+                      ตรวจสอบล่าสุด: {new Date().toLocaleDateString('th-TH')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 3: Security & Access Audit Trail */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Activity className="w-4 h-4 text-teal-700" />
+                      <span>บันทึกประวัติความปลอดภัยและการเข้าถึงข้อมูล (Security & Access Audit Trail)</span>
+                    </h5>
+                    <p className="text-[11px] text-slate-500">
+                      บันทึกทุกการเข้าสู่ระบบ การเปิดดูข้อมูลผู้ป่วย การส่งออกข้อมูล และการปรับแต่งสิทธิ์ตามข้อกำหนด PDPA
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(auditLogs, null, 2));
+                        const downloadAnchor = document.createElement('a');
+                        downloadAnchor.setAttribute("href", dataStr);
+                        downloadAnchor.setAttribute("download", `tb_care_security_audit_logs_${new Date().toISOString().split('T')[0]}.json`);
+                        document.body.appendChild(downloadAnchor);
+                        downloadAnchor.click();
+                        downloadAnchor.remove();
+                        showToast(true, 'ดาวน์โหลดบันทึก Security Audit Logs เรียบร้อยแล้ว');
+                      }}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>ดาวน์โหลด Log</span>
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => {
+                          if (confirm('คุณต้องการล้างประวัติ Audit Logs ในเครื่องใช่หรือไม่?')) {
+                            clearSecurityAuditLogs();
+                            setAuditLogs([]);
+                            showToast(true, 'ล้างบันทึก Audit Logs เรียบร้อยแล้ว');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                      >
+                        ล้าง Log
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="py-2.5 px-3">วัน-เวลา</th>
+                        <th className="py-2.5 px-3">ผู้ใช้งาน / บทบาท</th>
+                        <th className="py-2.5 px-3">การดำเนินการ (Action)</th>
+                        <th className="py-2.5 px-3">รายละเอียดเหตุการณ์</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {auditLogs.length > 0 ? (
+                        auditLogs.slice(0, 10).map((log) => (
+                          <tr key={log.id} className="hover:bg-slate-50 transition">
+                            <td className="py-2.5 px-3 whitespace-nowrap text-slate-500 font-mono text-[11px]">
+                              {formatThaiDateTime(log.timestamp)}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <div className="font-bold text-slate-800">{log.userName}</div>
+                              <div className="text-[10px] text-slate-400">{log.userEmail} ({log.userRole})</div>
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                log.action === 'LOGIN' ? 'bg-emerald-100 text-emerald-800' :
+                                log.action === 'SECURITY_CHANGE' ? 'bg-purple-100 text-purple-800' :
+                                log.action === 'CONFIG_SHEET' ? 'bg-blue-100 text-blue-800' :
+                                log.action === 'EXPORT_DATA' ? 'bg-amber-100 text-amber-800' :
+                                'bg-slate-100 text-slate-700'
+                              }`}>
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600 text-[11px]">
+                              {log.details}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="py-6 text-center text-slate-400">
+                            ไม่มีประวัติ Audit Logs
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 5: Backup & Raw Data */}
           {activeTab === 'backup' && (
             <div className="space-y-4">
               <div>

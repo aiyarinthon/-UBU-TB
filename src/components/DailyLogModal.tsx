@@ -141,8 +141,11 @@ export const DailyLogModal: React.FC<Props> = ({
               <h2 className="text-lg font-bold">
                 บันทึกการทานยาและติดตามอาการประจำวัน (DOTS Log)
               </h2>
-              <p className="text-xs text-teal-100">
-                ผู้ป่วย: <span className="font-semibold text-white">{patient.fullName}</span> ({patient.id})
+              <p className="text-xs text-teal-100 flex flex-wrap items-center gap-2 mt-0.5">
+                <span>ผู้ป่วย: <span className="font-semibold text-white">{patient.fullName}</span> ({patient.id})</span>
+                <span className="px-2 py-0.5 rounded-full bg-teal-800/80 text-teal-100 text-[10px] font-mono border border-teal-500/50">
+                  สูตรยา: {patient.treatmentRegimen || '2HRZE/4HR'}
+                </span>
               </p>
             </div>
           </div>

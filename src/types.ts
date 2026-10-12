@@ -227,3 +227,88 @@ export interface StaffAccount {
   isActive: boolean;
   lastActive?: string;
 }
+
+// การตรวจเอกซเรย์ปอดบุคลากรทางการแพทย์ (เพิ่มบันทึกได้เรื่อยๆ ทุกรอบ/ทุกปี)
+export interface HcwCxrRecord {
+  id: string; // e.g. CXR-HCW-001-1
+  date: string; // วันที่ตรวจ YYYY-MM-DD
+  roundNumber?: number; // ครั้งที่ 1, 2, 3...
+  reason: 'pre_employment' | 'annual' | 'contact_investigation' | 'symptomatic' | 'followup' | 'other';
+  // ตรวจแรกเข้า / ตรวจประจำปี / สัมผัสผู้ป่วยวัณโรคในงาน / มีอาการสงสัย / ติดตามผล / อื่นๆ
+  result: 'normal' | 'abnormal_suspect_tb' | 'abnormal_calcification_old' | 'abnormal_other' | 'pending';
+  // ปกติ / ผิดปกติสงสัยวัณโรค / รอยโรคเก่า/หินปูนคงที่ / ผิดปกติอื่นๆ / รอผล
+  resultDetail: string; // รายละเอียดผลการอ่านฟิล์ม เช่น "No active infiltration", "Fibronodular infiltrate at RUL"
+  filmImageUrl?: string; // ลิงก์หรือรูปภาพฟิล์ม
+  hospital: string; // สถานพยาบาลที่ตรวจ เช่น "รพ.มหาวิทยาลัยอุบลราชธานี"
+  radiologistOrDoctor?: string; // แพทย์ผู้อ่านผล
+  actionTaken?: string; // การดูแลต่อเนื่อง เช่น "นัดตรวจซ้ำ 1 ปี", "ส่งตรวจเสมหะ GeneXpert/AFB", "ส่งพบแพทย์คลินิกวัณโรค"
+  nextScheduledDate?: string; // วันนัดตรวจ CXR ครั้งถัดไป
+  recordedBy?: string;
+  createdAt: string;
+}
+
+// ข้อมูลการคัดกรองวัณโรคในบุคลากรทางการแพทย์ (Healthcare Workers / HCW)
+export interface HealthcareWorker {
+  id: string; // e.g. HCW-2026-001
+  staffId?: string; // รหัสบุคลากร / รหัสเจ้าหน้าที่
+  hn?: string; // HN ประจำโรงพยาบาล (ถ้ามี)
+  fullName: string; // ชื่อ-นามสกุล
+  gender: 'male' | 'female' | 'other'; // เพศ
+  age: number; // อายุ
+  phone: string; // เบอร์โทรศัพท์
+  email?: string; // อีเมล
+  department: string; // แผนก/ฝ่าย/หน่วยงาน เช่น "ห้องฉุกเฉิน (ER)", "หอผู้ป่วยอายุรกรรม", "คลินิกวัณโรค/โรคปอด", "ห้องชันสูตร (Lab)"
+  position: string; // ตำแหน่ง/วิชาชีพ เช่น "พยาบาลวิชาชีพ", "แพทย์", "ผู้ช่วยพยาบาล", "นักเทคนิคการแพทย์", "เภสัชกร"
+  employmentType: 'permanent' | 'contract' | 'temporary' | 'resident' | 'other'; // ประเภทการจ้างงาน
+  startDate?: string; // วันที่เริ่มปฏิบัติงาน
+  workLocation?: string; // อาคารหรือสถานที่ทำงาน
+
+  // สถานะการปฏิบัติงาน & ฐานข้อมูลการลาออก
+  status: 'active' | 'resigned' | 'retired' | 'transferred'; // ปฏิบัติงานอยู่ / ลาออก / เกษียณ / ย้ายสถานที่ทำงาน
+  resignationDate?: string; // วันที่ลาออก / พ้นสภาพ
+  resignationReason?: string; // เหตุผลการลาออก (เช่น ย้ายโรงพยาบาล, ศึกษาต่อ, ลาออกส่วนตัว, เกษียณอายุ)
+  resignationNotes?: string; // บันทึกเพิ่มเติมกรณีลาออก
+
+  // การประเมินความเสี่ยงและอาการ (เหมือนกลุ่มเสี่ยง)
+  riskLevel: 'high' | 'medium' | 'low'; // ระดับความเสี่ยงต่อการติดเชื้อวัณโรคจากการทำงาน
+  exposureHistory: boolean; // เคยมีประวัติสัมผัสผู้ป่วยวัณโรคในงานหรือไม่
+  exposureDetails?: string; // รายละเอียดการสัมผัส / วอร์ดที่สัมผัส
+  pastTbHistory: boolean; // เคยมีประวัติป่วยเป็นวัณโรคมาก่อนหรือไม่
+  
+  // อาการสงสัยวัณโรค
+  symptoms: {
+    chronicCough: boolean;
+    coughDurationWeeks?: number;
+    coughBlood: boolean;
+    fever: boolean;
+    nightSweats: boolean;
+    weightLoss: boolean;
+    chestPain: boolean;
+    fatigue: boolean;
+  };
+
+  comorbidities?: {
+    diabetes: boolean;
+    smoking: boolean;
+    hiv: 'negative' | 'positive' | 'unknown' | 'not_tested';
+    immunosuppressed?: boolean; // ภูมิคุ้มกันบกพร่อง หรือได้รับยากดภูมิ
+    otherNotes?: string;
+  };
+
+  // การตรวจคัดกรองการติดเชื้อแฝง (TST / IGRA)
+  latentTbTestType?: 'none' | 'tst' | 'igra';
+  latentTbTestResult?: 'negative' | 'positive' | 'indeterminate' | 'pending';
+  latentTbTestDate?: string;
+
+  // การให้ยาป้องกันวัณโรค (TPT)
+  tptStatus?: 'not_indicated' | 'indicated_not_started' | 'on_tpt' | 'completed' | 'refused';
+  tptRegimen?: '3HP' | '1HP' | '6H' | 'none';
+
+  // ประวัติการเอ็กซเรย์ที่กดเพิ่มได้เรื่อยๆ (Repeated CXR Screening Records)
+  cxrRecords: HcwCxrRecord[];
+
+  notes?: string;
+  lastUpdatedBy?: string;
+  updatedAt?: string;
+  createdAt: string;
+}

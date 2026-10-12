@@ -24,14 +24,18 @@ import {
   Download,
   FileSpreadsheet,
   Printer,
-  UploadCloud
+  UploadCloud,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Patient, DailyLog, InvestigationForm, ContactPerson, UserProfile } from '../types';
 import { Permissions } from '../lib/userStore';
+import { maskPhoneNumber } from '../lib/securityUtils';
 import { PatientReportPdfModal } from './PatientReportPdfModal';
 import { ExportTablePdfModal } from './ExportTablePdfModal';
 import { exportPatientsToExcel } from '../lib/exportUtils';
 import { formatThaiDate, formatThaiDateTime } from '../lib/dateUtils';
+import { normalizePatientStatus, getPatientStatusLabel } from '../lib/patientUtils';
 
 interface Props {
   patients: Patient[];
@@ -48,6 +52,8 @@ interface Props {
   statusFilter: string;
   onStatusFilterChange: (val: string) => void;
   onOpenImportModal?: (mode: 'patient' | 'contact') => void;
+  isMaskingEnabled?: boolean;
+  onToggleMasking?: () => void;
 }
 
 export const PatientList: React.FC<Props> = ({
@@ -65,6 +71,8 @@ export const PatientList: React.FC<Props> = ({
   statusFilter,
   onStatusFilterChange,
   onOpenImportModal,
+  isMaskingEnabled = false,
+  onToggleMasking,
 }) => {
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [pdfModalPatient, setPdfModalPatient] = useState<Patient | null>(null);
@@ -92,12 +100,13 @@ export const PatientList: React.FC<Props> = ({
       (p.lastUpdatedBy && p.lastUpdatedBy.toLowerCase().includes(q)) ||
       (p.ntipRegistrationDate && p.ntipRegistrationDate.includes(q));
     
-    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+    const normStatus = normalizePatientStatus(p.status);
+    const matchesStatus = statusFilter === 'all' || normStatus === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
   // Calculate high-level stats
-  const activePatients = patients.filter(p => p.status === 'active');
+  const activePatients = patients.filter(p => normalizePatientStatus(p.status) === 'active');
   const todayLogs = logs.filter(l => l.date === todayStr);
   const todayTaken = todayLogs.filter(l => l.takenMedication).length;
   const severeAlerts = logs
@@ -216,6 +225,21 @@ export const PatientList: React.FC<Props> = ({
               <span className="hidden sm:inline">พิมพ์ / PDF</span>
               <span className="sm:hidden">PDF</span>
             </button>
+
+            {onToggleMasking && (
+              <button
+                onClick={onToggleMasking}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer border ${
+                  isMaskingEnabled 
+                    ? 'bg-teal-50 text-teal-800 border-teal-300' 
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+                title={isMaskingEnabled ? 'โหมดพรางข้อมูล PDPA เปิดอยู่ (คลิกเพื่อแสดงเต็ม)' : 'คลิกเพื่อเปิดโหมดพรางข้อมูลเบอร์โทรศัพท์ (PDPA Privacy Mode)'}
+              >
+                {isMaskingEnabled ? <EyeOff className="w-3.5 h-3.5 text-teal-600" /> : <Eye className="w-3.5 h-3.5 text-slate-400" />}
+                <span className="hidden sm:inline">{isMaskingEnabled ? 'พรางข้อมูล: เปิด' : 'พรางข้อมูล'}</span>
+              </button>
+            )}
 
             <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
               <button
@@ -341,6 +365,12 @@ export const PatientList: React.FC<Props> = ({
                           <span>{patient.age} ปี ({patient.gender === 'female' ? 'หญิง' : 'ชาย'})</span>
                           <span>•</span>
                           <span>{patient.treatmentRights}</span>
+                          {patient.phone && (
+                            <>
+                              <span>•</span>
+                              <span className="font-mono text-slate-600">โทร: {maskPhoneNumber(patient.phone, isMaskingEnabled)}</span>
+                            </>
+                          )}
                         </div>
                       </td>
 
@@ -407,13 +437,21 @@ export const PatientList: React.FC<Props> = ({
 
                       {/* Status */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold inline-block ${
-                          patient.status === 'active' ? 'bg-teal-50 text-teal-800 border border-teal-200' :
-                          patient.status === 'completed' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
-                          'bg-slate-100 text-slate-600'
-                        }`}>
-                          {patient.status === 'active' ? 'กำลังรักษา' : patient.status === 'completed' ? 'รักษาครบ' : 'ส่งต่อ'}
-                        </span>
+                        {(() => {
+                          const norm = normalizePatientStatus(patient.status);
+                          return (
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold inline-block ${
+                              norm === 'active' ? 'bg-teal-50 text-teal-800 border border-teal-200' :
+                              norm === 'completed' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
+                              norm === 'transferred' ? 'bg-amber-50 text-amber-800 border border-amber-200' :
+                              'bg-rose-50 text-rose-800 border border-rose-200'
+                            }`}>
+                              {norm === 'active' ? 'กำลังรักษา' :
+                               norm === 'completed' ? 'รักษาครบ' :
+                               norm === 'transferred' ? 'ส่งต่อ' : 'ขาดการรักษา'}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* แก้ไขล่าสุดโดย (Audit column) */}
@@ -529,7 +567,7 @@ export const PatientList: React.FC<Props> = ({
 
                     <div className="flex items-center justify-between text-slate-500">
                       <span className="flex items-center gap-1"><Phone className="w-3 h-3 text-slate-400" /> เบอร์โทร:</span>
-                      <span className="font-medium text-slate-800">{patient.phone || '-'}</span>
+                      <span className="font-medium text-slate-800 font-mono">{maskPhoneNumber(patient.phone, isMaskingEnabled)}</span>
                     </div>
 
                     <div className="flex items-center justify-between text-slate-500">
